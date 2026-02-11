@@ -38,9 +38,13 @@ FROM alpine:latest
 # Install only runtime dependencies
 RUN apk add --update --no-cache \
     ffmpeg \
-    yt-dlp \
+    python3 \
+    py3-pip \
     libgcc \
     ca-certificates
+
+# Install yt-dlp via pip for easier updates (gets latest version from PyPI)
+RUN pip install --break-system-packages yt-dlp
 
 # Set the working directory for where the binary will live
 WORKDIR /bot

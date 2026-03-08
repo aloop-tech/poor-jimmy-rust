@@ -25,9 +25,9 @@ pub async fn enqueue_track(ctx: &Context, command: &CommandInteraction, mut sour
         .expect("Songbird Voice client placed in at initialization.");
 
     if let Some(call) = manager.get(guild_id) {
-        let mut handler = call.lock().await;
-
-        // Get metadata from the source
+        // Fetch metadata BEFORE locking the call handler — aux_metadata spawns yt-dlp
+        // and can take several seconds. Holding the call lock during that time blocks
+        // songbird's event dispatch and prevents audio from playing.
         debug!("Fetching track metadata for guild {}", guild_id);
         let metadata = match source.aux_metadata().await {
             Ok(meta) => meta,
@@ -46,18 +46,19 @@ pub async fn enqueue_track(ctx: &Context, command: &CommandInteraction, mut sour
 
         info!("Enqueueing track: '{}' in guild {}", track_title, guild_id);
 
-        // Create custom metadata to attach to the track
         let custom_metadata = Arc::new(TrackMetadata {
             title: track_title.clone(),
             thumbnail_url: track_thumbnail.clone(),
             duration: track_duration,
         });
 
-        // Create track with attached metadata
         let track_with_data = Track::new_with_data(source, custom_metadata);
 
-        // Play/enqueue song
-        let track = handler.enqueue(track_with_data).await;
+        // Lock only for the enqueue operation, then release immediately.
+        let track = {
+            let mut handler = call.lock().await;
+            handler.enqueue(track_with_data).await
+        };
 
         let _ = track.add_event(
             songbird::Event::Track(songbird::TrackEvent::Playable),
@@ -118,9 +119,7 @@ pub async fn enqueue_track_component(
         .expect("Songbird Voice client placed in at initialization.");
 
     if let Some(call) = manager.get(guild_id) {
-        let mut handler = call.lock().await;
-
-        // Get metadata from the source
+        // Fetch metadata BEFORE locking the call handler.
         debug!("Fetching track metadata for guild {}", guild_id);
         let metadata = match source.aux_metadata().await {
             Ok(meta) => meta,
@@ -139,18 +138,19 @@ pub async fn enqueue_track_component(
 
         info!("Enqueueing track: '{}' in guild {}", track_title, guild_id);
 
-        // Create custom metadata to attach to the track
         let custom_metadata = Arc::new(TrackMetadata {
             title: track_title.clone(),
             thumbnail_url: track_thumbnail.clone(),
             duration: track_duration,
         });
 
-        // Create track with attached metadata
         let track_with_data = Track::new_with_data(source, custom_metadata);
 
-        // Play/enqueue song
-        let track = handler.enqueue(track_with_data).await;
+        // Lock only for the enqueue operation, then release immediately.
+        let track = {
+            let mut handler = call.lock().await;
+            handler.enqueue(track_with_data).await
+        };
 
         let _ = track.add_event(
             songbird::Event::Track(songbird::TrackEvent::Playable),

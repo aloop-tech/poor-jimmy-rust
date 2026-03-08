@@ -67,20 +67,22 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
 
     match manager.join(guild_id, connect_to).await {
         Ok(call) => {
-            let mut handler = call.lock().await;
+            {
+                let mut handler = call.lock().await;
 
-            handler.remove_all_global_events();
+                handler.remove_all_global_events();
 
-            handler.add_global_event(
-                Event::Track(TrackEvent::End),
-                TrackEndNotifier {
-                    channel_id: command.channel_id,
-                    http: ctx.http.clone(),
-                    call: call.clone(),
-                    guild_id,
-                    manager: manager.clone(),
-                },
-            );
+                handler.add_global_event(
+                    Event::Track(TrackEvent::End),
+                    TrackEndNotifier {
+                        channel_id: command.channel_id,
+                        http: ctx.http.clone(),
+                        call: call.clone(),
+                        guild_id,
+                        manager: manager.clone(),
+                    },
+                );
+            } // lock released before any HTTP requests
 
             info!(
                 "Successfully joined voice channel {} in guild {}",

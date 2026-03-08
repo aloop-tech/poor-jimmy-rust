@@ -11,15 +11,18 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dependencies.songbird]
-version = "0.5.0"
+# Pointing at beer-psi's fork until DAVE support lands in a mainline songbird release.
+# Track upstream PR: https://github.com/serenity-rs/songbird/pull/291
+git = "https://github.com/beerpsi-forks/songbird"
+branch = "davey"
 default-features = true
 features = ["builtin-queue"]
 
 [dependencies.symphonia]
-version = "0.5.4"
+version = "0.5.5"
 
 [dependencies.serenity]
-version = "0.12.4"
+version = "0.12.5"
 default-features = false
 features = [
   "builder",
@@ -34,5 +37,5 @@ features = [
 ]
 
 [dependencies.tokio]
-version = "1.47.1"
+version = "1.50.0"
 features = ["macros", "rt-multi-thread"]

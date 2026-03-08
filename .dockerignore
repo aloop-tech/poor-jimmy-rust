@@ -5,10 +5,12 @@
 # https://docs.docker.com/go/build-context-dockerignore/
 
 **/.DS_Store
+**/.claude
 **/.classpath
 **/.dockerignore
 **/.git
 **/.env
+**/.github
 **/.gitignore
 **/.project
 **/.settings

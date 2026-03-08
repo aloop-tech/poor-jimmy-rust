@@ -16,9 +16,12 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
         return;
     }
 
-    // Execute the update command
+    // Get current version first
+    let current_version = get_ytdlp_version().await;
+
+    // Execute the update command using pip for latest version
     let output = match tokio::process::Command::new("sh")
-        .args(&["-c", "apk update yt-dlp && apk upgrade yt-dlp"])
+        .args(&["-c", "pip install --upgrade --break-system-packages yt-dlp"])
         .output()
         .await
     {
@@ -44,10 +47,28 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
         info!("yt-dlp update stderr: {}", stderr);
     }
 
+    // Get new version after update
+    let new_version = get_ytdlp_version().await;
+
     // Send the response based on success or failure
     let result_embed = if output.status.success() {
+        let old_ver = current_version.unwrap_or_else(|| "Unknown".to_string());
+        let new_ver = new_version.unwrap_or_else(|| "Unknown".to_string());
+
+        let description = if old_ver == new_ver {
+            format!(
+                "Update completed, but already on latest version.\n\n**Version:** {}",
+                new_ver
+            )
+        } else {
+            format!(
+                "Successfully updated Jimmy's dependencies!\n\n**Old version:** {}\n**New version:** {}",
+                old_ver, new_ver
+            )
+        };
+
         CreateEmbed::new()
-            .description("Successfully updated Jimmy's dependencies!")
+            .description(description)
             .color(Color::DARK_GREEN)
     } else {
         error!(
@@ -61,6 +82,20 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
     };
 
     respond_to_followup(command, &ctx.http, result_embed, false).await;
+}
+
+async fn get_ytdlp_version() -> Option<String> {
+    let output = tokio::process::Command::new("yt-dlp")
+        .arg("--version")
+        .output()
+        .await
+        .ok()?;
+
+    if output.status.success() {
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        None
+    }
 }
 
 pub fn register() -> CreateCommand {

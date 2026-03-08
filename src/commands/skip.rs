@@ -4,9 +4,7 @@ use serenity::{
 };
 use tracing::{error, warn};
 
-use crate::utils::response::{
-    respond_to_button, respond_to_error_button, respond_to_followup,
-};
+use crate::utils::response::{respond_to_button, respond_to_error_button, respond_to_followup};
 
 pub async fn run(ctx: &Context, command: &CommandInteraction) {
     if let Err(err) = command.defer(&ctx.http).await {
@@ -21,10 +19,13 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
     let guild_id = command.guild_id.unwrap();
 
     if let Some(call) = manager.get(guild_id) {
-        let handler = call.lock().await;
+        let current_song = {
+            let handler = call.lock().await;
+            handler.queue().current()
+        }; // Release lock on handler
 
         // Attempt to skip the currently playing song
-        let skip_result = match handler.queue().current() {
+        let skip_result = match current_song {
             Some(track) => track.stop(),
             None => {
                 let embed = CreateEmbed::new()
@@ -55,9 +56,14 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
             }
         };
     } else {
-        warn!("Attempted to skip song but bot is not in voice channel (guild {})", guild_id);
+        warn!(
+            "Attempted to skip song but bot is not in voice channel (guild {})",
+            guild_id
+        );
         let embed = CreateEmbed::new()
-            .description("Error skipping song! Ensure Poor Jimmy is in a voice channel with **/join**")
+            .description(
+                "Error skipping song! Ensure Poor Jimmy is in a voice channel with **/join**",
+            )
             .color(Color::DARK_RED);
         respond_to_followup(command, &ctx.http, embed, false).await;
     }
@@ -71,10 +77,13 @@ pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
     let guild_id = command.guild_id.unwrap();
 
     if let Some(call) = manager.get(guild_id) {
-        let handler = call.lock().await;
+        let current_song = {
+            let handler = call.lock().await;
+            handler.queue().current()
+        }; // Release lock on handler
 
         // Attempt to skip the currently playing song
-        let skip_result = match handler.queue().current() {
+        let skip_result = match current_song {
             Some(track) => track.stop(),
             None => {
                 respond_to_button(
@@ -96,13 +105,19 @@ pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
                 respond_to_button(command, &ctx.http, format!("Song **skipped!**"), false).await;
             }
             Err(why) => {
-                error!("Error skipping track via button in guild {}: {}", guild_id, why);
+                error!(
+                    "Error skipping track via button in guild {}: {}",
+                    guild_id, why
+                );
 
                 respond_to_error_button(command, &ctx.http, format!("Error skipping song!")).await;
             }
         };
     } else {
-        warn!("Attempted to skip song via button but bot is not in voice channel (guild {})", guild_id);
+        warn!(
+            "Attempted to skip song via button but bot is not in voice channel (guild {})",
+            guild_id
+        );
         respond_to_error_button(
             command,
             &ctx.http,

@@ -2,6 +2,7 @@ use serenity::{
     all::{Color, CommandInteraction, CreateEmbed},
     client::Context,
 };
+use songbird::tracks::TrackHandle;
 use tracing::{error, warn};
 
 use crate::utils::{
@@ -21,9 +22,12 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
         .expect("Songbird Voice client placed in at initialization.");
 
     if let Some(call) = manager.get(guild_id) {
-        let handler = call.lock().await;
+        let current_track = {
+            let handler = call.lock().await;
+            handler.queue().current()
+        }; // Release lock on handler
 
-        let current_track = match handler.queue().current() {
+        let current_track = match current_track {
             Some(track) => track,
             None => {
                 warn!("No track currently playing in guild {}", guild_id);

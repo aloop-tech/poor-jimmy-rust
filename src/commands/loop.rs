@@ -20,10 +20,10 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
     let guild_id = command.guild_id.unwrap();
 
     if let Some(call) = manager.get(guild_id) {
-        let handler = call.lock().await;
-
-        // Grab the currrently playing song
-        let current_song = handler.queue().current();
+        let current_song = {
+            let handler = call.lock().await;
+            handler.queue().current()
+        }; // Release lock on handler
 
         // Grab the state of the current song
         let is_looping = match &current_song {
@@ -109,10 +109,10 @@ pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
     let guild_id = command.guild_id.unwrap();
 
     if let Some(call) = manager.get(guild_id) {
-        let handler = call.lock().await;
-
-        // Grab the currrently playing song
-        let current_song = handler.queue().current();
+        let current_song = {
+            let handler = call.lock().await;
+            handler.queue().current()
+        }; // Release lock on handler
 
         // Grab the state of the current song
         let is_looping = match &current_song {

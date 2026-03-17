@@ -3,6 +3,7 @@ mod components;
 mod handlers;
 mod utils;
 
+use dotenv::dotenv;
 use std::env;
 
 use handlers::bot_event::BotEventHandler;
@@ -11,17 +12,17 @@ use serenity::client::ClientBuilder;
 use serenity::prelude::*;
 use songbird::SerenityInit;
 use tracing::{error, info};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 use utils::type_map::HttpKey;
 
 #[tokio::main]
 async fn main() {
+    dotenv().ok();
     // Initialize tracing subscriber with environment filter
     // Set RUST_LOG env variable to control log level (e.g., RUST_LOG=debug)
     tracing_subscriber::registry()
         .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("poor_jimmy=info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("poor_jimmy=info")),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();

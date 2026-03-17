@@ -10,6 +10,7 @@ pub mod pause;
 pub mod ping;
 pub mod play_title;
 pub mod play_url;
+pub mod playlist;
 pub mod resume;
 pub mod search;
 pub mod skip;

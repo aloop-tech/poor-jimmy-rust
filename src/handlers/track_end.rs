@@ -26,10 +26,12 @@ impl VoiceEventHandler for TrackEndNotifier {
             return None;
         };
 
-        let handler = self.call.lock().await;
-        let queue = handler.queue().current_queue();
+        let is_queue_empty = {
+            let handler = self.call.lock().await;
+            handler.queue().current_queue().is_empty()
+        }; // lock released before any I/O
 
-        if queue.is_empty() {
+        if is_queue_empty {
             debug!("Queue ended in channel {}", self.channel_id);
             // No songs left in the queue, notify the channel
             let embed = CreateEmbed::new()

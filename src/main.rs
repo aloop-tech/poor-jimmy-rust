@@ -3,7 +3,11 @@ mod components;
 mod handlers;
 mod utils;
 
-use std::env;
+use std::{
+    collections::HashMap,
+    env,
+    sync::{Arc, Mutex as StdMutex},
+};
 
 use handlers::bot_event::BotEventHandler;
 use reqwest::Client as HttpClient;
@@ -12,7 +16,7 @@ use serenity::prelude::*;
 use songbird::SerenityInit;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use utils::type_map::HttpKey;
+use utils::type_map::{DisconnectTimerKey, HttpKey};
 
 #[tokio::main]
 async fn main() {
@@ -48,6 +52,7 @@ async fn main() {
         .event_handler(BotEventHandler)
         .register_songbird()
         .type_map_insert::<HttpKey>(HttpClient::new())
+        .type_map_insert::<DisconnectTimerKey>(Arc::new(StdMutex::new(HashMap::new())))
         .await
     {
         Ok(client) => client,

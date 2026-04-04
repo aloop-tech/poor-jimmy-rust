@@ -1,10 +1,16 @@
 use serenity::{all::CommandInteraction, client::Context};
 use tracing::{error, info};
 
-use crate::utils::response::{respond_to_command, respond_to_error};
+use crate::utils::{
+    response::{respond_to_command, respond_to_error},
+    type_map::{cancel_disconnect_timer, get_disconnect_timers},
+};
 
 pub async fn run(ctx: &Context, command: &CommandInteraction) {
     let guild_id = command.guild_id.unwrap();
+
+    let disconnect_timers = get_disconnect_timers(ctx).await;
+    cancel_disconnect_timer(&disconnect_timers, guild_id);
 
     let manager = songbird::get(&ctx)
         .await

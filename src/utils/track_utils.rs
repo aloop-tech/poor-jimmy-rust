@@ -1,11 +1,16 @@
-use serenity::all::{Color, CommandInteraction, ComponentInteraction, Context, CreateEmbed};
+use serenity::all::{
+    ChannelId, Color, CommandInteraction, ComponentInteraction, Context, CreateEmbed, GuildId,
+};
 use songbird::{input::Input, tracks::Track};
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, error, info, warn};
 
 use crate::{
     handlers::track_play::TrackPlayHandler,
-    utils::response::{respond_to_followup, respond_to_followup_component},
+    utils::{
+        response::{respond_to_followup, respond_to_followup_component},
+        type_map::{cancel_disconnect_timer, get_disconnect_timers},
+    },
 };
 
 #[derive(Clone)]
@@ -15,174 +20,107 @@ pub struct TrackMetadata {
     pub duration: Option<Duration>,
 }
 
-pub async fn enqueue_track(ctx: &Context, command: &CommandInteraction, mut source: Input) {
-    let mut response_embed = CreateEmbed::default();
-
+pub async fn enqueue_track(ctx: &Context, command: &CommandInteraction, source: Input) {
     let guild_id = command.guild_id.unwrap();
-
-    let manager = songbird::get(&ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialization.");
-
-    if let Some(call) = manager.get(guild_id) {
-        // Fetch metadata BEFORE locking the call handler — aux_metadata spawns yt-dlp
-        // and can take several seconds. Holding the call lock during that time blocks
-        // songbird's event dispatch and prevents audio from playing.
-        debug!("Fetching track metadata for guild {}", guild_id);
-        let metadata = match source.aux_metadata().await {
-            Ok(meta) => meta,
-            Err(err) => {
-                warn!("Failed to fetch track metadata: {}. Using defaults.", err);
-                Default::default()
-            }
-        };
-
-        let track_title = metadata
-            .title
-            .clone()
-            .unwrap_or_else(|| String::from("Unknown Track Title"));
-        let track_thumbnail = metadata.thumbnail.clone();
-        let track_duration = metadata.duration.clone();
-
-        info!("Enqueueing track: '{}' in guild {}", track_title, guild_id);
-
-        let custom_metadata = Arc::new(TrackMetadata {
-            title: track_title.clone(),
-            thumbnail_url: track_thumbnail.clone(),
-            duration: track_duration,
-        });
-
-        let track_with_data = Track::new_with_data(source, custom_metadata);
-
-        // Lock only for the enqueue operation, then release immediately.
-        let track = {
-            let mut handler = call.lock().await;
-            handler.enqueue(track_with_data).await
-        };
-
-        let _ = track.add_event(
-            songbird::Event::Track(songbird::TrackEvent::Playable),
-            TrackPlayHandler {
-                channel_id: command.channel_id,
-                http: ctx.http.clone(),
-                title: track_title.clone(),
-                thumbnail: track_thumbnail.clone().unwrap_or_default(),
-            },
-        );
-
-        let response_description = format!("**Queued** {}!", track_title);
-
-        response_embed = response_embed
-            .description(response_description)
-            .color(Color::DARK_GREEN);
-
-        respond_to_followup(command, &ctx.http, response_embed, false).await;
-    } else {
-        error!(
-            "Bot is not in a voice channel in guild {}. Cannot enqueue track.",
-            guild_id
-        );
-
-        response_embed = response_embed
-            .description(
-                "Error playing song! Ensure Poor Jimmy is in a voice channel with **/join**",
-            )
-            .color(Color::DARK_RED);
-
-        respond_to_followup(command, &ctx.http, response_embed, false).await;
-    }
+    let embed = do_enqueue(ctx, guild_id, command.channel_id, source).await;
+    respond_to_followup(command, &ctx.http, embed, false).await;
 }
 
-/// Enqueue a track from a ComponentInteraction (e.g., button click).
-/// This is similar to enqueue_track but works with ComponentInteraction instead of CommandInteraction.
 pub async fn enqueue_track_component(
     ctx: &Context,
     interaction: &ComponentInteraction,
-    mut source: Input,
+    source: Input,
 ) {
-    let mut response_embed = CreateEmbed::default();
-
     let guild_id = match interaction.guild_id {
         Some(id) => id,
         None => {
-            response_embed = response_embed
+            let embed = CreateEmbed::default()
                 .description("This command can only be used in a server!")
                 .color(Color::DARK_RED);
-
-            respond_to_followup_component(interaction, &ctx.http, response_embed, false).await;
+            respond_to_followup_component(interaction, &ctx.http, embed, false).await;
             return;
         }
     };
+    let embed = do_enqueue(ctx, guild_id, interaction.channel_id, source).await;
+    respond_to_followup_component(interaction, &ctx.http, embed, false).await;
+}
 
-    let manager = songbird::get(&ctx)
+/// Fetches track metadata, enqueues the source into the active voice call, and
+/// registers the playback notification handler. Returns an embed describing the
+/// result (success or error) for the caller to send.
+async fn do_enqueue(
+    ctx: &Context,
+    guild_id: GuildId,
+    channel_id: ChannelId,
+    mut source: Input,
+) -> CreateEmbed {
+    let manager = songbird::get(ctx)
         .await
         .expect("Songbird Voice client placed in at initialization.");
 
-    if let Some(call) = manager.get(guild_id) {
-        // Fetch metadata BEFORE locking the call handler.
-        debug!("Fetching track metadata for guild {}", guild_id);
-        let metadata = match source.aux_metadata().await {
-            Ok(meta) => meta,
-            Err(err) => {
-                warn!("Failed to fetch track metadata: {}. Using defaults.", err);
-                Default::default()
-            }
-        };
-
-        let track_title = metadata
-            .title
-            .clone()
-            .unwrap_or_else(|| String::from("Unknown Track Title"));
-        let track_thumbnail = metadata.thumbnail.clone();
-        let track_duration = metadata.duration.clone();
-
-        info!("Enqueueing track: '{}' in guild {}", track_title, guild_id);
-
-        let custom_metadata = Arc::new(TrackMetadata {
-            title: track_title.clone(),
-            thumbnail_url: track_thumbnail.clone(),
-            duration: track_duration,
-        });
-
-        let track_with_data = Track::new_with_data(source, custom_metadata);
-
-        // Lock only for the enqueue operation, then release immediately.
-        let track = {
-            let mut handler = call.lock().await;
-            handler.enqueue(track_with_data).await
-        };
-
-        let _ = track.add_event(
-            songbird::Event::Track(songbird::TrackEvent::Playable),
-            TrackPlayHandler {
-                channel_id: interaction.channel_id,
-                http: ctx.http.clone(),
-                title: track_title.clone(),
-                thumbnail: track_thumbnail.clone().unwrap_or_default(),
-            },
-        );
-
-        let response_description = format!("**Queued** {}!", track_title);
-
-        response_embed = response_embed
-            .description(response_description)
-            .color(Color::DARK_GREEN);
-
-        respond_to_followup_component(interaction, &ctx.http, response_embed, false).await;
-    } else {
+    let Some(call) = manager.get(guild_id) else {
         error!(
             "Bot is not in a voice channel in guild {}. Cannot enqueue track.",
             guild_id
         );
-
-        response_embed = response_embed
+        return CreateEmbed::default()
             .description(
                 "Error playing song! Ensure Poor Jimmy is in a voice channel with **/join**",
             )
             .color(Color::DARK_RED);
+    };
 
-        respond_to_followup_component(interaction, &ctx.http, response_embed, false).await;
-    }
+    // Fetch metadata BEFORE locking the call handler — aux_metadata spawns yt-dlp
+    // and can take several seconds. Holding the call lock during that time blocks
+    // songbird's event dispatch and prevents audio from playing.
+    debug!("Fetching track metadata for guild {}", guild_id);
+    let metadata = match source.aux_metadata().await {
+        Ok(meta) => meta,
+        Err(err) => {
+            warn!("Failed to fetch track metadata: {}. Using defaults.", err);
+            Default::default()
+        }
+    };
+
+    let track_title = metadata
+        .title
+        .unwrap_or_else(|| String::from("Unknown Track Title"));
+    let track_thumbnail = metadata.thumbnail;
+    let track_duration = metadata.duration;
+
+    info!("Enqueueing track: '{}' in guild {}", track_title, guild_id);
+
+    let custom_metadata = Arc::new(TrackMetadata {
+        title: track_title.clone(),
+        thumbnail_url: track_thumbnail.clone(),
+        duration: track_duration,
+    });
+
+    let track_with_data = Track::new_with_data(source, custom_metadata);
+
+    // Cancel any pending disconnect timer since we're adding a track
+    let disconnect_timers = get_disconnect_timers(ctx).await;
+    cancel_disconnect_timer(&disconnect_timers, guild_id);
+
+    // Lock only for the enqueue operation, then release immediately.
+    let track = {
+        let mut handler = call.lock().await;
+        handler.enqueue(track_with_data).await
+    };
+
+    let _ = track.add_event(
+        songbird::Event::Track(songbird::TrackEvent::Playable),
+        TrackPlayHandler {
+            channel_id,
+            http: ctx.http.clone(),
+            title: track_title.clone(),
+            thumbnail: track_thumbnail.unwrap_or_default(),
+        },
+    );
+
+    CreateEmbed::default()
+        .description(format!("**Queued** {}!", track_title))
+        .color(Color::DARK_GREEN)
 }
 
 #[cfg(test)]

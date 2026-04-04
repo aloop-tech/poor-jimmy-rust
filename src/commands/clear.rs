@@ -19,9 +19,16 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
     let guild_id = command.guild_id.unwrap();
 
     if let Some(call) = manager.get(guild_id) {
-        let handler = call.lock().await;
+        let queue_length = {
+            let handler = call.lock().await;
+            let queue_length = handler.queue().len();
 
-        let queue_length = handler.queue().len();
+            if queue_length > 0 {
+                handler.queue().stop();
+            }
+
+            queue_length
+        }; // Release lock on handler
 
         if queue_length == 0 {
             let embed = CreateEmbed::new()
@@ -29,8 +36,6 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
                 .color(Color::DARK_GREEN);
             respond_to_followup(command, &ctx.http, embed, false).await;
         } else {
-            handler.queue().stop();
-
             let embed = CreateEmbed::new()
                 .description("Queue **cleared!**")
                 .color(Color::DARK_GREEN);
@@ -54,9 +59,16 @@ pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
     let guild_id = command.guild_id.unwrap();
 
     if let Some(call) = manager.get(guild_id) {
-        let handler = call.lock().await;
+        let queue_length = {
+            let handler = call.lock().await;
+            let queue_length = handler.queue().len();
 
-        let queue_length = handler.queue().len();
+            if queue_length > 0 {
+                handler.queue().stop();
+            }
+
+            queue_length
+        }; // Release lock on handler
 
         if queue_length == 0 {
             respond_to_button(
@@ -67,8 +79,6 @@ pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
             )
             .await;
         } else {
-            handler.queue().stop();
-
             respond_to_button(command, &ctx.http, format!("Queue **cleared!**"), false).await;
         }
     } else {

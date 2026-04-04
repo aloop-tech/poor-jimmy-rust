@@ -19,10 +19,11 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
     let guild_id = command.guild_id.unwrap();
 
     if let Some(call) = manager.get(guild_id) {
-        let handler = call.lock().await;
+        let current_queue = {
+            let handler = call.lock().await;
+            handler.queue().current_queue()
+        }; // Release lock on handler
 
-        // Grab the queue and make sure its not empty
-        let current_queue = handler.queue().current_queue();
         if current_queue.is_empty() {
             let embed = CreateEmbed::new()
                 .description("The queue is **empty!**")

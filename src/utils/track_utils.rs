@@ -7,7 +7,10 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     handlers::track_play::TrackPlayHandler,
-    utils::response::{respond_to_followup, respond_to_followup_component},
+    utils::{
+        response::{respond_to_followup, respond_to_followup_component},
+        type_map::{cancel_disconnect_timer, get_disconnect_timers},
+    },
 };
 
 #[derive(Clone)]
@@ -94,6 +97,10 @@ async fn do_enqueue(
     });
 
     let track_with_data = Track::new_with_data(source, custom_metadata);
+
+    // Cancel any pending disconnect timer since we're adding a track
+    let disconnect_timers = get_disconnect_timers(ctx).await;
+    cancel_disconnect_timer(&disconnect_timers, guild_id);
 
     // Lock only for the enqueue operation, then release immediately.
     let track = {

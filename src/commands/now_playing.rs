@@ -2,7 +2,6 @@ use serenity::{
     all::{Color, CommandInteraction, CreateEmbed},
     client::Context,
 };
-use songbird::tracks::TrackHandle;
 use tracing::{error, warn};
 
 use crate::utils::{

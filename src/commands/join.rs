@@ -8,6 +8,7 @@ use tracing::{error, info, warn};
 use crate::commands::help::get_help_text;
 use crate::handlers::track_end::TrackEndNotifier;
 use crate::utils::response::respond_to_followup;
+use crate::utils::type_map::get_disconnect_timers;
 
 pub async fn run(ctx: &Context, command: &CommandInteraction) {
     if let Err(err) = command.defer(&ctx.http).await {
@@ -65,6 +66,8 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
         connect_to, guild_id
     );
 
+    let disconnect_timers = get_disconnect_timers(ctx).await;
+
     match manager.join(guild_id, connect_to).await {
         Ok(call) => {
             {
@@ -80,6 +83,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
                         call: call.clone(),
                         guild_id,
                         manager: manager.clone(),
+                        disconnect_timers,
                     },
                 );
             } // lock released before any HTTP requests

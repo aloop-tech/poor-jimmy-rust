@@ -1,43 +1,39 @@
-use serenity::{all::CommandInteraction, client::Context};
 use tracing::{error, info};
 
-use crate::utils::{
-    response::{respond_to_command, respond_to_error},
-    type_map::{cancel_disconnect_timer, get_disconnect_timers},
+use crate::{
+    data::{Context, Error},
+    utils::{
+        response::{error_embed, ok_embed, reply},
+        track_utils::get_manager,
+    },
 };
 
-pub async fn run(ctx: &Context, command: &CommandInteraction) {
-    let guild_id = command.guild_id.unwrap();
+/// Remove Poor Jimmy from the voice channel
+#[poise::command(slash_command, guild_only)]
+pub async fn leave(ctx: Context<'_>) -> Result<(), Error> {
+    let guild_id = ctx.guild_id().expect("guild_only command");
 
-    let disconnect_timers = get_disconnect_timers(ctx).await;
-    cancel_disconnect_timer(&disconnect_timers, guild_id);
+    ctx.data().guilds.cancel_disconnect_timer(guild_id);
 
-    let manager = songbird::get(&ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialisation.");
+    let manager = get_manager(ctx.serenity_context()).await;
 
     match manager.remove(guild_id).await {
         Ok(_) => {
             info!("Successfully left voice channel in guild {}", guild_id);
-            respond_to_command(
-                command,
-                &ctx.http,
-                format!("Poor Jimmy **left** the voice channel!"),
-                false,
-            )
-            .await;
+            reply(ctx, ok_embed("Poor Jimmy **left** the voice channel!")).await
         }
         Err(err) => {
             error!(
                 "Failed to leave voice channel in guild {}: {}",
                 guild_id, err
             );
-            respond_to_error(command, &ctx.http, format!("Error leaving voice channel! Ensure Poor Jimmy is in a voice channel with **/join**")).await;
+            reply(
+                ctx,
+                error_embed(
+                    "Error leaving voice channel! Ensure Poor Jimmy is in a voice channel with **/join**",
+                ),
+            )
+            .await
         }
     }
-}
-
-pub fn register() -> serenity::builder::CreateCommand {
-    serenity::builder::CreateCommand::new("leave")
-        .description("Remove Poor Jimmy from the voice channel")
 }

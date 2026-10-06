@@ -1,0 +1,37 @@
+name: Check
+
+# Triggers: pull requests, pushes to main, or manually via the GitHub Actions UI
+on:
+    pull_request:
+    push:
+        branches:
+            - main
+    workflow_dispatch:
+
+jobs:
+    check:
+        # Native ARM64 runner, same as the deploy workflow
+        runs-on: ubuntu-24.04-arm
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: rustfmt, clippy
+
+            # Cache the cargo registry and target directory between runs
+            - name: Cache build artifacts
+              uses: Swatinem/rust-cache@v2
+
+            - name: Check formatting
+              run: cargo fmt --check
+
+            # Fail on any warning so they don't pile up again
+            - name: Lint
+              run: cargo clippy --all-targets --locked -- -D warnings
+
+            - name: Run tests
+              run: cargo test --locked

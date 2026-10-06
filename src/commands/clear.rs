@@ -1,97 +1,43 @@
-use serenity::{
-    all::{Color, CommandInteraction, ComponentInteraction, CreateEmbed},
-    client::Context,
+use serenity::all::{Context as SerenityContext, CreateEmbed, GuildId};
+
+use crate::{
+    data::{Context, Error},
+    utils::{
+        response::{error_embed, ok_embed, reply},
+        track_utils::get_manager,
+    },
 };
-use tracing::error;
 
-use crate::utils::response::{respond_to_button, respond_to_error_button, respond_to_followup};
-
-pub async fn run(ctx: &Context, command: &CommandInteraction) {
-    if let Err(err) = command.defer(&ctx.http).await {
-        error!("Failed to defer clear command: {}", err);
-        return;
-    }
-
-    let manager = songbird::get(&ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialization.");
-
-    let guild_id = command.guild_id.unwrap();
-
-    if let Some(call) = manager.get(guild_id) {
-        let queue_length = {
-            let handler = call.lock().await;
-            let queue_length = handler.queue().len();
-
-            if queue_length > 0 {
-                handler.queue().stop();
-            }
-
-            queue_length
-        }; // Release lock on handler
-
-        if queue_length == 0 {
-            let embed = CreateEmbed::new()
-                .description("There is nothing to clear!")
-                .color(Color::DARK_GREEN);
-            respond_to_followup(command, &ctx.http, embed, false).await;
-        } else {
-            let embed = CreateEmbed::new()
-                .description("Queue **cleared!**")
-                .color(Color::DARK_GREEN);
-            respond_to_followup(command, &ctx.http, embed, false).await;
-        }
-    } else {
-        let embed = CreateEmbed::new()
-            .description(
-                "Error clearing queue! Ensure Poor Jimmy is in a voice channel with **/join**",
-            )
-            .color(Color::DARK_RED);
-        respond_to_followup(command, &ctx.http, embed, false).await;
-    }
+/// Stop the current song and clear the queue
+#[poise::command(slash_command, guild_only)]
+pub async fn clear(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
+    let guild_id = ctx.guild_id().expect("guild_only command");
+    reply(ctx, action(ctx.serenity_context(), guild_id).await).await
 }
 
-pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
-    let manager = songbird::get(&ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialization.");
+/// Stops playback and clears the queue. Shared by /clear and the Clear button.
+pub async fn action(ctx: &SerenityContext, guild_id: GuildId) -> CreateEmbed {
+    let Some(call) = get_manager(ctx).await.get(guild_id) else {
+        return error_embed(
+            "Error clearing queue! Ensure Poor Jimmy is in a voice channel with **/join**",
+        );
+    };
 
-    let guild_id = command.guild_id.unwrap();
+    let queue_length = {
+        let handler = call.lock().await;
+        let queue_length = handler.queue().len();
 
-    if let Some(call) = manager.get(guild_id) {
-        let queue_length = {
-            let handler = call.lock().await;
-            let queue_length = handler.queue().len();
-
-            if queue_length > 0 {
-                handler.queue().stop();
-            }
-
-            queue_length
-        }; // Release lock on handler
-
-        if queue_length == 0 {
-            respond_to_button(
-                command,
-                &ctx.http,
-                format!("There is nothing to clear!"),
-                false,
-            )
-            .await;
-        } else {
-            respond_to_button(command, &ctx.http, format!("Queue **cleared!**"), false).await;
+        if queue_length > 0 {
+            handler.queue().stop();
         }
-    } else {
-        respond_to_error_button(
-            command,
-            &ctx.http,
-            format!("Error clearing queue! Ensure Poor Jimmy is in a voice channel with **/join**"),
-        )
-        .await;
-    }
-}
 
-pub fn register() -> serenity::builder::CreateCommand {
-    serenity::builder::CreateCommand::new("clear")
-        .description("Stop the current song and clear the queue")
+        queue_length
+    }; // Release lock on handler
+
+    if queue_length == 0 {
+        ok_embed("There is nothing to clear!")
+    } else {
+        ok_embed("Queue **cleared!**")
+    }
 }

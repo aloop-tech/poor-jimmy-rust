@@ -1,29 +1,27 @@
-use serenity::{
-    all::{Color, CommandInteraction, CreateEmbed},
-    client::Context,
-};
 use songbird::{Event, TrackEvent};
 use tracing::{error, info, warn};
 
-use crate::handlers::track_end::TrackEndNotifier;
-use crate::utils::response::respond_to_followup;
-use crate::utils::type_map::get_disconnect_timers;
+use crate::{
+    data::{Context, Error},
+    handlers::track_end::TrackEndNotifier,
+    utils::{
+        response::{error_embed, ok_embed, reply},
+        track_utils::get_manager,
+    },
+};
 
-pub async fn run(ctx: &Context, command: &CommandInteraction) {
-    if let Err(err) = command.defer(&ctx.http).await {
-        error!("Failed to defer join command: {}", err);
-        return;
-    }
+/// Summon Poor Jimmy to your voice channel
+#[poise::command(slash_command, guild_only)]
+pub async fn join(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
 
-    let guild_id = command.guild_id.unwrap();
-    let user_id = {
-        let member = command.member.as_ref().unwrap();
-        member.user.id
-    };
+    let guild_id = ctx.guild_id().expect("guild_only command");
+    let user_id = ctx.author().id;
+    let serenity_ctx = ctx.serenity_context();
 
     // Extract voice channel ID from cache, ensuring guild reference is dropped
     let voice_channel_id = {
-        ctx.cache.guild(guild_id).and_then(|g| {
+        serenity_ctx.cache.guild(guild_id).and_then(|g| {
             g.voice_states
                 .get(&user_id)
                 .and_then(|voice_state| voice_state.channel_id)
@@ -31,41 +29,25 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
     };
 
     // Check if we successfully got the guild from cache
-    if voice_channel_id.is_none() && ctx.cache.guild(guild_id).is_none() {
+    if voice_channel_id.is_none() && serenity_ctx.cache.guild(guild_id).is_none() {
         error!("Failed to find guild {} in cache", guild_id);
-        let embed = CreateEmbed::new()
-            .description("Error joining voice channel")
-            .color(Color::DARK_RED);
-        respond_to_followup(command, &ctx.http, embed, false).await;
-        return;
+        return reply(ctx, error_embed("Error joining voice channel")).await;
     }
 
-    let connect_to = match voice_channel_id {
-        Some(channel) => channel,
-        None => {
-            warn!(
-                "User {} attempted to use /join but is not in a voice channel (guild {})",
-                user_id, guild_id
-            );
-            let embed = CreateEmbed::new()
-                .description("You're not in a voice channel!")
-                .color(Color::DARK_RED);
-            respond_to_followup(command, &ctx.http, embed, false).await;
-
-            return;
-        }
+    let Some(connect_to) = voice_channel_id else {
+        warn!(
+            "User {} attempted to use /join but is not in a voice channel (guild {})",
+            user_id, guild_id
+        );
+        return reply(ctx, error_embed("You're not in a voice channel!")).await;
     };
 
-    let manager = songbird::get(&ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialisation.");
+    let manager = get_manager(serenity_ctx).await;
 
     info!(
         "Attempting to join voice channel {} in guild {}",
         connect_to, guild_id
     );
-
-    let disconnect_timers = get_disconnect_timers(ctx).await;
 
     match manager.join(guild_id, connect_to).await {
         Ok(call) => {
@@ -77,12 +59,12 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
                 handler.add_global_event(
                     Event::Track(TrackEvent::End),
                     TrackEndNotifier {
-                        channel_id: command.channel_id,
-                        http: ctx.http.clone(),
+                        channel_id: ctx.channel_id(),
+                        http: serenity_ctx.http.clone(),
                         call: call.clone(),
                         guild_id,
                         manager: manager.clone(),
-                        disconnect_timers,
+                        disconnect_timers: ctx.data().disconnect_timers.clone(),
                     },
                 );
             } // lock released before any HTTP requests
@@ -92,26 +74,14 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
                 connect_to, guild_id
             );
 
-            // Send success message
-            let success_embed = CreateEmbed::new()
-                .description("Poor Jimmy **joined** the voice channel!")
-                .color(Color::DARK_GREEN);
-            respond_to_followup(command, &ctx.http, success_embed, false).await;
+            reply(ctx, ok_embed("Poor Jimmy **joined** the voice channel!")).await
         }
         Err(err) => {
             error!(
                 "Failed to join voice channel {} in guild {}: {}",
                 connect_to, guild_id, err
             );
-            let embed = CreateEmbed::new()
-                .description("Error joining voice channel!")
-                .color(Color::DARK_RED);
-            respond_to_followup(command, &ctx.http, embed, false).await;
+            reply(ctx, error_embed("Error joining voice channel!")).await
         }
     }
-}
-
-pub fn register() -> serenity::builder::CreateCommand {
-    serenity::builder::CreateCommand::new("join")
-        .description("Summon Poor Jimmy to your voice channel")
 }

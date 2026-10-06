@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    env,
-    sync::{Arc, Mutex as StdMutex},
-    time::Duration,
-};
+use std::{env, sync::Arc, time::Duration};
 
 use serenity::{
     async_trait,
@@ -13,10 +8,9 @@ use serenity::{
     prelude::Mutex,
 };
 use songbird::{Call, Event, EventContext, EventHandler as VoiceEventHandler, Songbird};
-use tokio::task::AbortHandle;
 use tracing::{debug, error, info};
 
-use crate::utils::type_map::cancel_disconnect_timer;
+use crate::data::{DisconnectTimers, cancel_disconnect_timer};
 
 pub struct TrackEndNotifier {
     pub channel_id: ChannelId,
@@ -24,7 +18,7 @@ pub struct TrackEndNotifier {
     pub call: Arc<Mutex<Call>>,
     pub guild_id: GuildId,
     pub manager: Arc<Songbird>,
-    pub disconnect_timers: Arc<StdMutex<HashMap<GuildId, AbortHandle>>>,
+    pub disconnect_timers: DisconnectTimers,
 }
 
 #[async_trait]

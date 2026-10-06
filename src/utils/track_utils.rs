@@ -1,16 +1,12 @@
-use serenity::all::{
-    ChannelId, Color, CommandInteraction, ComponentInteraction, Context, CreateEmbed, GuildId,
-};
-use songbird::{input::Input, tracks::Track};
+use serenity::all::{ChannelId, Context as SerenityContext, CreateEmbed, GuildId};
+use songbird::{Songbird, input::Input, tracks::Track};
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    data::{Data, cancel_disconnect_timer},
     handlers::track_play::TrackPlayHandler,
-    utils::{
-        response::{respond_to_followup, respond_to_followup_component},
-        type_map::{cancel_disconnect_timer, get_disconnect_timers},
-    },
+    utils::response::{error_embed, ok_embed},
 };
 
 #[derive(Clone)]
@@ -20,54 +16,33 @@ pub struct TrackMetadata {
     pub duration: Option<Duration>,
 }
 
-pub async fn enqueue_track(ctx: &Context, command: &CommandInteraction, source: Input) {
-    let guild_id = command.guild_id.unwrap();
-    let embed = do_enqueue(ctx, guild_id, command.channel_id, source).await;
-    respond_to_followup(command, &ctx.http, embed, false).await;
-}
-
-pub async fn enqueue_track_component(
-    ctx: &Context,
-    interaction: &ComponentInteraction,
-    source: Input,
-) {
-    let guild_id = match interaction.guild_id {
-        Some(id) => id,
-        None => {
-            let embed = CreateEmbed::default()
-                .description("This command can only be used in a server!")
-                .color(Color::DARK_RED);
-            respond_to_followup_component(interaction, &ctx.http, embed, false).await;
-            return;
-        }
-    };
-    let embed = do_enqueue(ctx, guild_id, interaction.channel_id, source).await;
-    respond_to_followup_component(interaction, &ctx.http, embed, false).await;
+/// The songbird voice manager registered on the client at startup
+pub async fn get_manager(ctx: &SerenityContext) -> Arc<Songbird> {
+    songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialization.")
 }
 
 /// Fetches track metadata, enqueues the source into the active voice call, and
 /// registers the playback notification handler. Returns an embed describing the
 /// result (success or error) for the caller to send.
-async fn do_enqueue(
-    ctx: &Context,
+pub async fn enqueue(
+    ctx: &SerenityContext,
+    data: &Data,
     guild_id: GuildId,
     channel_id: ChannelId,
     mut source: Input,
 ) -> CreateEmbed {
-    let manager = songbird::get(ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialization.");
+    let manager = get_manager(ctx).await;
 
     let Some(call) = manager.get(guild_id) else {
         error!(
             "Bot is not in a voice channel in guild {}. Cannot enqueue track.",
             guild_id
         );
-        return CreateEmbed::default()
-            .description(
-                "Error playing song! Ensure Poor Jimmy is in a voice channel with **/join**",
-            )
-            .color(Color::DARK_RED);
+        return error_embed(
+            "Error playing song! Ensure Poor Jimmy is in a voice channel with **/join**",
+        );
     };
 
     // Fetch metadata BEFORE locking the call handler — aux_metadata spawns yt-dlp
@@ -99,8 +74,7 @@ async fn do_enqueue(
     let track_with_data = Track::new_with_data(source, custom_metadata);
 
     // Cancel any pending disconnect timer since we're adding a track
-    let disconnect_timers = get_disconnect_timers(ctx).await;
-    cancel_disconnect_timer(&disconnect_timers, guild_id);
+    cancel_disconnect_timer(&data.disconnect_timers, guild_id);
 
     // Lock only for the enqueue operation, then release immediately.
     let track = {
@@ -118,9 +92,7 @@ async fn do_enqueue(
         },
     );
 
-    CreateEmbed::default()
-        .description(format!("**Queued** {}!", track_title))
-        .color(Color::DARK_GREEN)
+    ok_embed(format!("**Queued** {}!", track_title))
 }
 
 #[cfg(test)]

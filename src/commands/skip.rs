@@ -1,132 +1,48 @@
-use serenity::{
-    all::{Color, CommandInteraction, ComponentInteraction, CreateEmbed},
-    client::Context,
-};
+use serenity::all::{Context as SerenityContext, CreateEmbed, GuildId};
 use tracing::{error, warn};
 
-use crate::utils::response::{respond_to_button, respond_to_error_button, respond_to_followup};
+use crate::{
+    data::{Context, Error},
+    utils::{
+        response::{error_embed, ok_embed, reply},
+        track_utils::get_manager,
+    },
+};
 
-pub async fn run(ctx: &Context, command: &CommandInteraction) {
-    if let Err(err) = command.defer(&ctx.http).await {
-        error!("Failed to defer skip command: {}", err);
-        return;
-    }
+/// Skip the currently playing song
+#[poise::command(slash_command, guild_only)]
+pub async fn skip(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
+    let guild_id = ctx.guild_id().expect("guild_only command");
+    reply(ctx, action(ctx.serenity_context(), guild_id).await).await
+}
 
-    let manager = songbird::get(&ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialization.");
-
-    let guild_id = command.guild_id.unwrap();
-
-    if let Some(call) = manager.get(guild_id) {
-        let current_song = {
-            let handler = call.lock().await;
-            handler.queue().current()
-        }; // Release lock on handler
-
-        // Attempt to skip the currently playing song
-        let skip_result = match current_song {
-            Some(track) => track.stop(),
-            None => {
-                let embed = CreateEmbed::new()
-                    .description("There is no song currently playing!")
-                    .color(Color::DARK_RED);
-                respond_to_followup(command, &ctx.http, embed, false).await;
-
-                return;
-            }
-        };
-
-        match skip_result {
-            // The song was successfully skipped. Notify the channel if the
-            // queue is now empty
-            Ok(_) => {
-                let embed = CreateEmbed::new()
-                    .description("Song **skipped!**")
-                    .color(Color::DARK_GREEN);
-                respond_to_followup(command, &ctx.http, embed, false).await;
-            }
-            Err(why) => {
-                error!("Error skipping track in guild {}: {}", guild_id, why);
-
-                let embed = CreateEmbed::new()
-                    .description("Error skipping song!")
-                    .color(Color::DARK_RED);
-                respond_to_followup(command, &ctx.http, embed, false).await;
-            }
-        };
-    } else {
+/// Skips the current song. Shared by /skip and the Skip button.
+pub async fn action(ctx: &SerenityContext, guild_id: GuildId) -> CreateEmbed {
+    let Some(call) = get_manager(ctx).await.get(guild_id) else {
         warn!(
             "Attempted to skip song but bot is not in voice channel (guild {})",
             guild_id
         );
-        let embed = CreateEmbed::new()
-            .description(
-                "Error skipping song! Ensure Poor Jimmy is in a voice channel with **/join**",
-            )
-            .color(Color::DARK_RED);
-        respond_to_followup(command, &ctx.http, embed, false).await;
-    }
-}
-
-pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
-    let manager = songbird::get(&ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialization.");
-
-    let guild_id = command.guild_id.unwrap();
-
-    if let Some(call) = manager.get(guild_id) {
-        let current_song = {
-            let handler = call.lock().await;
-            handler.queue().current()
-        }; // Release lock on handler
-
-        // Attempt to skip the currently playing song
-        let skip_result = match current_song {
-            Some(track) => track.stop(),
-            None => {
-                respond_to_button(
-                    command,
-                    &ctx.http,
-                    format!("There is no song currently playing!"),
-                    false,
-                )
-                .await;
-
-                return;
-            }
-        };
-
-        match skip_result {
-            // The song was successfully skipped. Notify the channel if the
-            // queue is now empty
-            Ok(_) => {
-                respond_to_button(command, &ctx.http, format!("Song **skipped!**"), false).await;
-            }
-            Err(why) => {
-                error!(
-                    "Error skipping track via button in guild {}: {}",
-                    guild_id, why
-                );
-
-                respond_to_error_button(command, &ctx.http, format!("Error skipping song!")).await;
-            }
-        };
-    } else {
-        warn!(
-            "Attempted to skip song via button but bot is not in voice channel (guild {})",
-            guild_id
+        return error_embed(
+            "Error skipping song! Ensure Poor Jimmy is in a voice channel with **/join**",
         );
-        respond_to_error_button(
-            command,
-            &ctx.http,
-            format!("Error skipping song! Ensure Poor Jimmy is in a voice channel with **/join**"),
-        )
-        .await;
-    }
-}
+    };
 
-pub fn register() -> serenity::builder::CreateCommand {
-    serenity::builder::CreateCommand::new("skip").description("Skip the currently playing song")
+    let current_song = {
+        let handler = call.lock().await;
+        handler.queue().current()
+    }; // Release lock on handler
+
+    let Some(song) = current_song else {
+        return error_embed("There is no song currently playing!");
+    };
+
+    match song.stop() {
+        Ok(_) => ok_embed("Song **skipped!**"),
+        Err(why) => {
+            error!("Error skipping track in guild {}: {}", guild_id, why);
+            error_embed("Error skipping song!")
+        }
+    }
 }

@@ -1,186 +1,57 @@
-use serenity::{
-    all::{Color, CommandInteraction, ComponentInteraction, CreateEmbed},
-    client::Context,
-};
+use serenity::all::{Context as SerenityContext, CreateEmbed, GuildId};
 use songbird::tracks::PlayMode;
 use tracing::error;
 
-use crate::utils::response::{respond_to_button, respond_to_error_button, respond_to_followup};
+use crate::{
+    data::{Context, Error},
+    utils::{
+        response::{error_embed, ok_embed, reply},
+        track_utils::get_manager,
+    },
+};
 
-pub async fn run(ctx: &Context, command: &CommandInteraction) {
-    if let Err(err) = command.defer(&ctx.http).await {
-        error!("Failed to defer resume command: {}", err);
-        return;
-    }
-
-    let manager = songbird::get(&ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialization.");
-
-    let guild_id = command.guild_id.unwrap();
-
-    if let Some(call) = manager.get(guild_id) {
-        let current_song = {
-            let handler = call.lock().await;
-            handler.queue().current()
-        }; // Release lock on handler
-
-        // Attempt to grab the current play state of the current song
-        let song_state = match &current_song {
-            Some(track) => match track.get_info().await {
-                Ok(state) => state.playing,
-                Err(why) => {
-                    error!("Error getting song state: {why}");
-
-                    let embed = CreateEmbed::new()
-                        .description("Error resuming song!")
-                        .color(Color::DARK_RED);
-                    respond_to_followup(command, &ctx.http, embed, false).await;
-
-                    return;
-                }
-            },
-            None => {
-                let embed = CreateEmbed::new()
-                    .description("There is no song to resume!")
-                    .color(Color::DARK_GREEN);
-                respond_to_followup(command, &ctx.http, embed, false).await;
-
-                return;
-            }
-        };
-
-        // If the song is paused, resume it
-        match song_state {
-            PlayMode::Pause => match current_song {
-                Some(song) => match song.play() {
-                    Ok(_) => {
-                        let embed = CreateEmbed::new()
-                            .description("Song **resumed!**")
-                            .color(Color::DARK_GREEN);
-                        respond_to_followup(command, &ctx.http, embed, false).await;
-                    }
-                    Err(why) => {
-                        error!("Error resuming song: {why}");
-
-                        let embed = CreateEmbed::new()
-                            .description("Error resuming song!")
-                            .color(Color::DARK_RED);
-                        respond_to_followup(command, &ctx.http, embed, false).await;
-                    }
-                },
-                None => {
-                    let embed = CreateEmbed::new()
-                        .description("There is nothing to resume!")
-                        .color(Color::DARK_GREEN);
-                    respond_to_followup(command, &ctx.http, embed, false).await;
-                }
-            },
-            _ => {
-                let embed = CreateEmbed::new()
-                    .description("The song is currently playing!")
-                    .color(Color::DARK_GREEN);
-                respond_to_followup(command, &ctx.http, embed, false).await;
-            }
-        };
-    } else {
-        let embed = CreateEmbed::new()
-            .description(
-                "Error resuming song! Ensure Poor Jimmy is in a voice channel with **/join**",
-            )
-            .color(Color::DARK_RED);
-        respond_to_followup(command, &ctx.http, embed, false).await;
-    }
+/// Resume the currently paused song
+#[poise::command(slash_command, guild_only)]
+pub async fn resume(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
+    let guild_id = ctx.guild_id().expect("guild_only command");
+    reply(ctx, action(ctx.serenity_context(), guild_id).await).await
 }
 
-pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
-    let manager = songbird::get(&ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialization.");
+/// Resumes the current song if it's paused. Shared by /resume and the Resume button.
+pub async fn action(ctx: &SerenityContext, guild_id: GuildId) -> CreateEmbed {
+    let Some(call) = get_manager(ctx).await.get(guild_id) else {
+        return error_embed(
+            "Error resuming song! Ensure Poor Jimmy is in a voice channel with **/join**",
+        );
+    };
 
-    let guild_id = command.guild_id.unwrap();
+    let current_song = {
+        let handler = call.lock().await;
+        handler.queue().current()
+    }; // Release lock on handler
 
-    if let Some(call) = manager.get(guild_id) {
-        let current_song = {
-            let handler = call.lock().await;
-            handler.queue().current()
-        }; // Release lock on handler
+    let Some(song) = current_song else {
+        return ok_embed("There is no song to resume!");
+    };
 
-        // Attempt to grab the current play state of the current song
-        let song_state = match &current_song {
-            Some(track) => match track.get_info().await {
-                Ok(state) => state.playing,
-                Err(why) => {
-                    error!("Error getting song state: {why}");
+    let song_state = match song.get_info().await {
+        Ok(state) => state.playing,
+        Err(why) => {
+            error!("Error getting song state: {why}");
+            return error_embed("Error resuming song!");
+        }
+    };
 
-                    respond_to_error_button(command, &ctx.http, format!("Error resuming song!"))
-                        .await;
-
-                    return;
-                }
-            },
-            None => {
-                respond_to_button(
-                    command,
-                    &ctx.http,
-                    format!("There is no song to resume!"),
-                    false,
-                )
-                .await;
-
-                return;
-            }
-        };
-
-        // If the song is paused, resume it
-        match song_state {
-            PlayMode::Pause => match current_song {
-                Some(song) => match song.play() {
-                    Ok(_) => {
-                        respond_to_button(command, &ctx.http, format!("Song **resumed!**"), false)
-                            .await;
-                    }
-                    Err(why) => {
-                        error!("Error resuming song: {why}");
-
-                        respond_to_error_button(
-                            command,
-                            &ctx.http,
-                            format!("Error resuming song!"),
-                        )
-                        .await;
-                    }
-                },
-                None => {
-                    respond_to_button(
-                        command,
-                        &ctx.http,
-                        format!("There is nothing to resume!"),
-                        false,
-                    )
-                    .await;
-                }
-            },
-            _ => {
-                respond_to_button(
-                    command,
-                    &ctx.http,
-                    format!("The song is currently playing!"),
-                    false,
-                )
-                .await;
-            }
-        };
-    } else {
-        respond_to_error_button(
-            command,
-            &ctx.http,
-            format!("Error resuming song! Ensure Poor Jimmy is in a voice channel with **/join**"),
-        )
-        .await;
+    if !matches!(song_state, PlayMode::Pause) {
+        return ok_embed("The song is currently playing!");
     }
-}
 
-pub fn register() -> serenity::builder::CreateCommand {
-    serenity::builder::CreateCommand::new("resume").description("Resume the currently paused song")
+    match song.play() {
+        Ok(_) => ok_embed("Song **resumed!**"),
+        Err(why) => {
+            error!("Error resuming song: {why}");
+            error_embed("Error resuming song!")
+        }
+    }
 }

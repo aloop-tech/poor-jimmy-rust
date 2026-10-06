@@ -1,84 +1,47 @@
-use serenity::{
-    all::{CommandDataOptionValue, CommandInteraction, CommandOptionType},
-    builder::CreateEmbed,
-    client::Context,
-    model::colour::Color,
-};
-use tracing::error;
-
 use songbird::input::YoutubeDl;
 
-use crate::utils::{
-    response::respond_to_followup, track_utils::enqueue_track, type_map::get_http_client,
+use crate::{
+    data::{Context, Error},
+    utils::{
+        response::{error_embed, reply},
+        track_utils::enqueue,
+    },
 };
 
-pub async fn run(ctx: &Context, command: &CommandInteraction) {
-    if let Err(err) = command.defer(&ctx.http).await {
-        error!("Failed to defer play-url command: {}", err);
-        return;
-    }
-
-    let mut response_embed = CreateEmbed::default();
-
-    let command_value = command.data.options.first();
-
-    let resolved_value = match command_value {
-        Some(data) => &data.value,
-        _ => {
-            response_embed = response_embed
-                .description("Please provide a URL to play!")
-                .color(Color::DARK_RED);
-
-            respond_to_followup(command, &ctx.http, response_embed, false).await;
-
-            return;
-        }
-    };
-
-    let url = match resolved_value {
-        CommandDataOptionValue::String(value) => value.clone(),
-        _ => {
-            response_embed = response_embed
-                .description("Please provide a valid URL!")
-                .color(Color::DARK_RED);
-
-            respond_to_followup(command, &ctx.http, response_embed, false).await;
-
-            return;
-        }
-    };
+/// Play the audio from a Youtube video URL
+#[poise::command(slash_command, guild_only, rename = "play-url")]
+pub async fn play_url(
+    ctx: Context<'_>,
+    #[description = "A Youtube video URL"] url: String,
+) -> Result<(), Error> {
+    ctx.defer().await?;
 
     // Validate its a valid Youtube URL
     if !is_valid_youtube_url(&url) {
-        response_embed = response_embed
-            .description("Please provide a valid **/watch** Youtube URL")
-            .color(Color::DARK_RED);
-
-        respond_to_followup(command, &ctx.http, response_embed, false).await;
-
-        return;
+        return reply(
+            ctx,
+            error_embed("Please provide a valid **/watch** Youtube URL"),
+        )
+        .await;
     }
 
-    let http_client = get_http_client(ctx).await;
+    let guild_id = ctx.guild_id().expect("guild_only command");
 
     // Get the audio source for the URL
-    let source = YoutubeDl::new(http_client, url);
+    let source = YoutubeDl::new(ctx.data().http_client.clone(), url);
 
-    enqueue_track(ctx, command, source.into()).await;
+    let embed = enqueue(
+        ctx.serenity_context(),
+        ctx.data(),
+        guild_id,
+        ctx.channel_id(),
+        source.into(),
+    )
+    .await;
+
+    reply(ctx, embed).await
 }
 
-pub fn register() -> serenity::builder::CreateCommand {
-    serenity::builder::CreateCommand::new("play-url")
-        .description("Play the audio from a Youtube video URL")
-        .add_option(
-            serenity::builder::CreateCommandOption::new(
-                CommandOptionType::String,
-                "url",
-                "A Youtube video URL",
-            )
-            .required(true),
-        )
-}
 fn is_valid_youtube_url(url: &String) -> bool {
     (url.contains("youtube.com") && (url.contains("/watch"))) || url.contains("youtu.be")
 }

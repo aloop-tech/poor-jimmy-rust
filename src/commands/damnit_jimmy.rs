@@ -1,51 +1,36 @@
-use crate::utils::response::respond_to_followup;
-use serenity::{
-    all::{CommandInteraction, UserId},
-    builder::{CreateCommand, CreateEmbed},
-    client::Context,
-    model::Color,
-};
 use tracing::{error, info};
 
-pub async fn run(ctx: &Context, command: &CommandInteraction) {
-    info!("Received damnit-jimmy command from {}", command.user.name);
+use crate::{
+    data::{Context, Error},
+    utils::response::{error_embed, ok_embed, reply},
+};
+
+/// Updates Jimmy's dependencies. Use cautiously! Only use this when experiencing playback issues!
+#[poise::command(slash_command, guild_only, owners_only, rename = "damnit-jimmy")]
+pub async fn damnit_jimmy(ctx: Context<'_>) -> Result<(), Error> {
+    info!("Received damnit-jimmy command from {}", ctx.author().name);
 
     // Defer the response since this might take a while
-    if let Err(err) = command.defer(&ctx.http).await {
-        error!("Failed to defer damnit-jimmy command: {}", err);
-        return;
-    }
-
-    if !is_owner(ctx, command.user.id).await {
-        info!("Refused damnit-jimmy from non-owner {}", command.user.name);
-
-        let embed = CreateEmbed::new()
-            .description("Only Poor Jimmy's owner can update its dependencies!")
-            .color(Color::DARK_RED);
-
-        respond_to_followup(command, &ctx.http, embed, false).await;
-        return;
-    }
+    ctx.defer().await?;
 
     // Get current version first
     let current_version = get_ytdlp_version().await;
 
     // Execute the update command using pip for latest version
     let output = match tokio::process::Command::new("pip")
-        .args(["install", "--upgrade", "--break-system-packages", "yt-dlp[default]"])
+        .args([
+            "install",
+            "--upgrade",
+            "--break-system-packages",
+            "yt-dlp[default]",
+        ])
         .output()
         .await
     {
         Ok(output) => output,
         Err(err) => {
             error!("Failed to execute yt-dlp update command: {}", err);
-
-            let error_embed = CreateEmbed::new()
-                .description("Failed to update Jimmy's dependencies!")
-                .color(Color::DARK_RED);
-
-            respond_to_followup(command, &ctx.http, error_embed, false).await;
-            return;
+            return reply(ctx, error_embed("Failed to update Jimmy's dependencies!")).await;
         }
     };
 
@@ -78,38 +63,17 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
             )
         };
 
-        CreateEmbed::new()
-            .description(description)
-            .color(Color::DARK_GREEN)
+        ok_embed(description)
     } else {
         error!(
             "yt-dlp update failed with exit code: {:?}",
             output.status.code()
         );
 
-        CreateEmbed::new()
-            .description("Failed to update Jimmy's dependencies!")
-            .color(Color::DARK_RED)
+        error_embed("Failed to update Jimmy's dependencies!")
     };
 
-    respond_to_followup(command, &ctx.http, result_embed, false).await;
-}
-
-/// Whether the user owns the bot's Discord application, either directly or as a
-/// member of the team that owns it.
-async fn is_owner(ctx: &Context, user_id: UserId) -> bool {
-    match ctx.http.get_current_application_info().await {
-        Ok(info) => {
-            info.owner.is_some_and(|owner| owner.id == user_id)
-                || info
-                    .team
-                    .is_some_and(|team| team.members.iter().any(|m| m.user.id == user_id))
-        }
-        Err(err) => {
-            error!("Failed to fetch application info for owner check: {}", err);
-            false
-        }
-    }
+    reply(ctx, result_embed).await
 }
 
 async fn get_ytdlp_version() -> Option<String> {
@@ -124,9 +88,4 @@ async fn get_ytdlp_version() -> Option<String> {
     } else {
         None
     }
-}
-
-pub fn register() -> CreateCommand {
-    CreateCommand::new("damnit-jimmy")
-        .description("Updates Jimmy's dependencies. Use cautiously! Only use this when experiencing playback issues!")
 }

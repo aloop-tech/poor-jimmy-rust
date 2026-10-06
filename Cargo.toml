@@ -4,6 +4,7 @@ version = "2.0.1"
 edition = "2024"
 
 [dependencies]
+poise = "0.6"
 # rustls only, matching serenity/songbird; the default native-tls would pull in OpenSSL on Linux
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "charset", "http2"] }
 serde = { version = "1.0", features = ["derive"] }

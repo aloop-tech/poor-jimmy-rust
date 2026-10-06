@@ -1,63 +1,44 @@
-use serenity::{
-    all::{Color, CommandInteraction, CreateEmbed},
-    client::Context,
+use crate::{
+    data::{Context, Error},
+    utils::{
+        response::{error_embed, ok_embed, reply},
+        track_utils::{TrackMetadata, get_manager},
+    },
 };
-use tracing::error;
 
-use crate::utils::{response::respond_to_followup, track_utils::TrackMetadata};
+/// Display the current queue of songs
+#[poise::command(slash_command, guild_only)]
+pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
 
-pub async fn run(ctx: &Context, command: &CommandInteraction) {
-    if let Err(err) = command.defer(&ctx.http).await {
-        error!("Failed to defer list command: {}", err);
-        return;
-    }
+    let guild_id = ctx.guild_id().expect("guild_only command");
 
-    let manager = songbird::get(&ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialization.");
-
-    let guild_id = command.guild_id.unwrap();
-
-    if let Some(call) = manager.get(guild_id) {
-        let current_queue = {
-            let handler = call.lock().await;
-            handler.queue().current_queue()
-        }; // Release lock on handler
-
-        if current_queue.is_empty() {
-            let embed = CreateEmbed::new()
-                .description("The queue is **empty!**")
-                .color(Color::DARK_GREEN);
-            respond_to_followup(command, &ctx.http, embed, false).await;
-
-            return;
-        }
-
-        // Transform the Vec of TrackHandles into a Vec of titles
-        let queue_titles: Vec<String> = current_queue
-            .iter()
-            .map(|track| track.data::<TrackMetadata>().title.clone())
-            .collect();
-
-        // Build the response description string.
-        let response_description = format_queue_description(queue_titles);
-
-        let embed = CreateEmbed::new()
-            .description(response_description)
-            .color(Color::DARK_GREEN);
-        respond_to_followup(command, &ctx.http, embed, false).await;
-    } else {
-        let embed = CreateEmbed::new()
-            .description(
+    let Some(call) = get_manager(ctx.serenity_context()).await.get(guild_id) else {
+        return reply(
+            ctx,
+            error_embed(
                 "Error listing queue! Ensure Poor Jimmy is in a voice channel with **/join**",
-            )
-            .color(Color::DARK_RED);
-        respond_to_followup(command, &ctx.http, embed, false).await;
-    }
-}
+            ),
+        )
+        .await;
+    };
 
-pub fn register() -> serenity::builder::CreateCommand {
-    serenity::builder::CreateCommand::new("list").description("Display the current queue of songs")
+    let current_queue = {
+        let handler = call.lock().await;
+        handler.queue().current_queue()
+    }; // Release lock on handler
+
+    if current_queue.is_empty() {
+        return reply(ctx, ok_embed("The queue is **empty!**")).await;
+    }
+
+    // Transform the Vec of TrackHandles into a Vec of titles
+    let queue_titles: Vec<String> = current_queue
+        .iter()
+        .map(|track| track.data::<TrackMetadata>().title.clone())
+        .collect();
+
+    reply(ctx, ok_embed(format_queue_description(queue_titles))).await
 }
 
 /// Discord rejects embeds whose description is longer than this

@@ -1,23 +1,20 @@
+use poise::CreateReply;
 use serde::Deserialize;
 use serenity::{
-    all::{
-        ButtonStyle, CommandDataOptionValue, CommandInteraction, CommandOptionType,
-        ComponentInteraction,
-    },
-    builder::{CreateActionRow, CreateButton, CreateEmbed},
-    client::Context,
+    all::{ButtonStyle, ComponentInteraction, Context as SerenityContext, GuildId},
+    builder::{CreateActionRow, CreateButton, CreateEmbed, EditInteractionResponse},
     model::colour::Color,
 };
+use songbird::input::YoutubeDl;
 use tracing::{debug, error};
 
 use crate::{
+    data::{Context, Data, Error},
     utils::{
-        response::{respond_to_error_button, respond_to_followup},
-        track_utils::enqueue_track_component,
-        type_map::get_http_client,
+        response::{error_embed, reply, respond_to_followup_component},
+        track_utils::enqueue,
     },
 };
-use songbird::input::YoutubeDl;
 
 #[derive(Debug, Deserialize)]
 struct Thumbnail {
@@ -33,45 +30,19 @@ struct SearchResult {
     thumbnails: Vec<Thumbnail>,
 }
 
-pub async fn run(ctx: &Context, command: &CommandInteraction) {
-    if let Err(err) = command.defer(&ctx.http).await {
-        error!("Failed to defer search command: {}", err);
-        return;
-    }
-
-    let mut response_embed = CreateEmbed::default();
-
-    let command_value = command.data.options.first();
-
-    let resolved_value = match command_value {
-        Some(data) => &data.value,
-        _ => {
-            response_embed = response_embed
-                .description("Please provide a search query!")
-                .color(Color::DARK_RED);
-
-            respond_to_followup(command, &ctx.http, response_embed, false).await;
-            return;
-        }
-    };
-
-    let query = match resolved_value {
-        CommandDataOptionValue::String(value) => value.clone(),
-        _ => {
-            response_embed = response_embed
-                .description("Please provide a valid search query!")
-                .color(Color::DARK_RED);
-
-            respond_to_followup(command, &ctx.http, response_embed, false).await;
-            return;
-        }
-    };
+/// Search YouTube and choose a video's audio to play
+#[poise::command(slash_command, guild_only)]
+pub async fn search(
+    ctx: Context<'_>,
+    #[description = "Search query"] query: String,
+) -> Result<(), Error> {
+    ctx.defer().await?;
 
     debug!("Searching YouTube for: {}", query);
 
     // Run yt-dlp to search YouTube
     let output = match tokio::process::Command::new("yt-dlp")
-        .args(&[
+        .args([
             "--default-search",
             "ytsearch5",
             "--dump-json",
@@ -87,12 +58,11 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
         Ok(output) => output,
         Err(err) => {
             error!("Failed to execute yt-dlp: {}", err);
-            response_embed = response_embed
-                .description("Failed to search YouTube. Please try again later.")
-                .color(Color::DARK_RED);
-
-            respond_to_followup(command, &ctx.http, response_embed, false).await;
-            return;
+            return reply(
+                ctx,
+                error_embed("Failed to search YouTube. Please try again later."),
+            )
+            .await;
         }
     };
 
@@ -101,12 +71,11 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
             "yt-dlp command failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        response_embed = response_embed
-            .description("Failed to search YouTube. Please try again later.")
-            .color(Color::DARK_RED);
-
-        respond_to_followup(command, &ctx.http, response_embed, false).await;
-        return;
+        return reply(
+            ctx,
+            error_embed("Failed to search YouTube. Please try again later."),
+        )
+        .await;
     }
 
     // Parse the JSON output - yt-dlp returns one JSON object per line
@@ -134,43 +103,40 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
     debug!("Parsed {} results from query", results.len());
 
     if results.is_empty() {
-        response_embed = response_embed
-            .description(format!("No results found for \"{}\"", query))
-            .color(Color::DARK_RED);
-
-        respond_to_followup(command, &ctx.http, response_embed, false).await;
-        return;
+        return reply(
+            ctx,
+            error_embed(format!("No results found for \"{}\"", query)),
+        )
+        .await;
     }
 
-    // Create embeds for each search result
-    let embeds: Vec<CreateEmbed> = results
-        .iter()
-        .enumerate()
-        .map(|(idx, result)| {
-            let duration_str = result
-                .duration
-                .map(|d| {
-                    let total_seconds = d as u64;
-                    let minutes = total_seconds / 60;
-                    let seconds = total_seconds % 60;
-                    format!("{}:{:02}", minutes, seconds)
-                })
-                .unwrap_or_else(|| "Unknown".to_string());
+    let mut response = CreateReply::default();
 
-            let mut embed = CreateEmbed::default()
-                .title(format!("{}. {}", idx + 1, result.title))
-                .description(format!("Duration: {}", duration_str))
-                .url(format!("https://www.youtube.com/watch?v={}", result.id))
-                .color(Color::BLUE);
+    // Create an embed for each search result
+    for (idx, result) in results.iter().enumerate() {
+        let duration_str = result
+            .duration
+            .map(|d| {
+                let total_seconds = d as u64;
+                let minutes = total_seconds / 60;
+                let seconds = total_seconds % 60;
+                format!("{}:{:02}", minutes, seconds)
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
 
-            // Add thumbnail if available (use the last one which is usually highest quality)
-            if let Some(thumbnail) = result.thumbnails.last() {
-                embed = embed.thumbnail(&thumbnail.url);
-            }
+        let mut embed = CreateEmbed::default()
+            .title(format!("{}. {}", idx + 1, result.title))
+            .description(format!("Duration: {}", duration_str))
+            .url(format!("https://www.youtube.com/watch?v={}", result.id))
+            .color(Color::BLUE);
 
-            embed
-        })
-        .collect();
+        // Add thumbnail if available (use the last one which is usually highest quality)
+        if let Some(thumbnail) = result.thumbnails.last() {
+            embed = embed.thumbnail(&thumbnail.url);
+        }
+
+        response = response.embed(embed);
+    }
 
     // Create buttons for each result
     let buttons: Vec<CreateButton> = results
@@ -189,20 +155,17 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
         .map(|chunk| CreateActionRow::Buttons(chunk.to_vec()))
         .collect();
 
-    if let Err(err) = command
-        .edit_response(
-            &ctx.http,
-            serenity::builder::EditInteractionResponse::new()
-                .embeds(embeds)
-                .components(action_rows),
-        )
-        .await
-    {
-        error!("Failed to send search results: {}", err);
-    }
+    ctx.send(response.components(action_rows)).await?;
+
+    Ok(())
 }
 
-pub async fn handle_component(ctx: &Context, interaction: &ComponentInteraction) {
+pub async fn handle_component(
+    ctx: &SerenityContext,
+    interaction: &ComponentInteraction,
+    data: &Data,
+    guild_id: GuildId,
+) {
     if let Err(err) = interaction.defer(&ctx.http).await {
         error!("Failed to defer search component interaction: {}", err);
         return;
@@ -217,7 +180,12 @@ pub async fn handle_component(ctx: &Context, interaction: &ComponentInteraction)
             if let Err(err) = interaction.delete_response(&ctx.http).await {
                 error!("Failed to delete search results message: {}", err);
             }
-            respond_to_error_button(interaction, &ctx.http, "Invalid selection!".to_string()).await;
+            respond_to_followup_component(
+                interaction,
+                &ctx.http,
+                error_embed("Invalid selection!"),
+            )
+            .await;
             return;
         }
     };
@@ -233,7 +201,7 @@ pub async fn handle_component(ctx: &Context, interaction: &ComponentInteraction)
     if let Err(err) = interaction
         .edit_response(
             &ctx.http,
-            serenity::builder::EditInteractionResponse::new()
+            EditInteractionResponse::new()
                 .embeds(vec![loading_embed])
                 .components(vec![]), // Remove buttons
         )
@@ -242,27 +210,13 @@ pub async fn handle_component(ctx: &Context, interaction: &ComponentInteraction)
         error!("Failed to update search results message: {}", err);
     }
 
-    let http_client = get_http_client(ctx).await;
-    let source = YoutubeDl::new(http_client, video_url);
+    let source = YoutubeDl::new(data.http_client.clone(), video_url);
 
     // Delete the loading message before enqueueing
     if let Err(err) = interaction.delete_response(&ctx.http).await {
         error!("Failed to delete loading message: {}", err);
     }
 
-    // Use the helper function to enqueue the track
-    enqueue_track_component(ctx, interaction, source.into()).await;
-}
-
-pub fn register() -> serenity::builder::CreateCommand {
-    serenity::builder::CreateCommand::new("search")
-        .description("Search YouTube and choose a video's audio to play")
-        .add_option(
-            serenity::builder::CreateCommandOption::new(
-                CommandOptionType::String,
-                "query",
-                "Search query",
-            )
-            .required(true),
-        )
+    let embed = enqueue(ctx, data, guild_id, interaction.channel_id, source.into()).await;
+    respond_to_followup_component(interaction, &ctx.http, embed).await;
 }

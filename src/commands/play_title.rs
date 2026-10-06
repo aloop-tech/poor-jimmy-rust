@@ -1,69 +1,31 @@
-use serenity::{
-    all::{CommandDataOptionValue, CommandInteraction, CommandOptionType},
-    builder::CreateEmbed,
-    client::Context,
-    model::colour::Color,
-};
 use songbird::input::YoutubeDl;
-use tracing::error;
 
-use crate::utils::{
-    response::respond_to_followup, track_utils::enqueue_track, type_map::get_http_client,
+use crate::{
+    data::{Context, Error},
+    utils::{response::reply, track_utils::enqueue},
 };
 
-pub async fn run(ctx: &Context, command: &CommandInteraction) {
-    if let Err(err) = command.defer(&ctx.http).await {
-        error!("Failed to defer play-title command: {}", err);
-        return;
-    }
+/// Play the audio from a Youtube video searching by title
+#[poise::command(slash_command, guild_only, rename = "play-title")]
+pub async fn play_title(
+    ctx: Context<'_>,
+    #[description = "A Youtube video title"] title: String,
+) -> Result<(), Error> {
+    ctx.defer().await?;
 
-    let mut response_embed = CreateEmbed::default();
+    let guild_id = ctx.guild_id().expect("guild_only command");
 
-    let command_value = command.data.options.first();
+    // Get the audio source for the search
+    let source = YoutubeDl::new_search(ctx.data().http_client.clone(), title);
 
-    let resolved_value = match command_value {
-        Some(data) => &data.value,
-        _ => {
-            response_embed = response_embed
-                .description("Please provide a title to search!")
-                .color(Color::DARK_RED);
+    let embed = enqueue(
+        ctx.serenity_context(),
+        ctx.data(),
+        guild_id,
+        ctx.channel_id(),
+        source.into(),
+    )
+    .await;
 
-            respond_to_followup(command, &ctx.http, response_embed, false).await;
-
-            return;
-        }
-    };
-
-    let title = match resolved_value {
-        CommandDataOptionValue::String(value) => value.clone(),
-        _ => {
-            response_embed = response_embed
-                .description("Please provide a valid title!")
-                .color(Color::DARK_RED);
-
-            respond_to_followup(command, &ctx.http, response_embed, false).await;
-
-            return;
-        }
-    };
-
-    let http_client = get_http_client(ctx).await;
-
-    // Get the audio source for the URL
-    let source = YoutubeDl::new_search(http_client, title);
-
-    enqueue_track(ctx, command, source.into()).await;
-}
-
-pub fn register() -> serenity::builder::CreateCommand {
-    serenity::builder::CreateCommand::new("play-title")
-        .description("Play the audio from a Youtube video searching by title")
-        .add_option(
-            serenity::builder::CreateCommandOption::new(
-                CommandOptionType::String,
-                "title",
-                "A Youtube video title",
-            )
-            .required(true),
-        )
+    reply(ctx, embed).await
 }

@@ -1,27 +1,13 @@
-use serenity::{
-    all::{Color, CommandInteraction, CreateEmbed},
-    client::Context,
+use crate::{
+    data::{Context, Error},
+    utils::response::{ok_embed, reply},
 };
-use tracing::error;
 
-use crate::utils::response::respond_to_followup;
-
-pub async fn run(ctx: &Context, command: &CommandInteraction) {
-    if let Err(err) = command.defer(&ctx.http).await {
-        error!("Failed to defer help command: {}", err);
-        return;
-    }
-
-    let embed = CreateEmbed::new()
-        .description(get_help_text())
-        .color(Color::DARK_GREEN);
-
-    respond_to_followup(command, &ctx.http, embed, false).await;
-}
-
-pub fn register() -> serenity::builder::CreateCommand {
-    serenity::builder::CreateCommand::new("help")
-        .description("Display directions on how to use Poor Jimmy's commands")
+/// Display directions on how to use Poor Jimmy's commands
+#[poise::command(slash_command, guild_only)]
+pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
+    reply(ctx, ok_embed(get_help_text())).await
 }
 
 /// Get the help description text

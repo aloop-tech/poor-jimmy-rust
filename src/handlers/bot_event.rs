@@ -1,132 +1,120 @@
-use serenity::all::{Command, Interaction, Ready};
-use serenity::async_trait;
-use serenity::client::{Context, EventHandler};
-use serenity::gateway::ActivityData;
-use serenity::model::user::OnlineStatus;
-use tracing::{debug, error, info};
+use poise::{CreateReply, FrameworkError};
+use serenity::all::{Context as SerenityContext, FullEvent, Interaction};
+use tracing::{debug, error};
 
-use crate::commands;
-use crate::utils::response::{respond_to_error, respond_to_error_button};
+use crate::{
+    commands,
+    data::{Context, Data, Error},
+    utils::response::{error_embed, respond_to_component},
+};
 
-/// The primary handler for the bot that handles all
-/// the events for the client
-pub struct BotEventHandler;
+/// Logs each slash command before it runs
+pub async fn pre_command(ctx: Context<'_>) {
+    let guild_id = ctx
+        .guild_id()
+        .map(|g| g.to_string())
+        .unwrap_or_else(|| "DM".to_string());
 
-#[async_trait]
-impl EventHandler for BotEventHandler {
-    async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
-        if let Interaction::Command(command) = interaction {
-            let command_name = command.data.name.as_str();
-            let user = &command.user;
+    debug!(
+        "Received command '{}' from user {} in guild {}",
+        ctx.command().qualified_name,
+        ctx.author().name,
+        guild_id
+    );
+}
 
-            // Every command needs a guild, so reject DMs here instead of in each command
-            let Some(guild_id) = command.guild_id else {
-                debug!("Rejected command '{}' from user {} in DM", command_name, user.name);
-                respond_to_error(&command, &ctx.http, "Poor Jimmy only works in servers!".to_string())
-                    .await;
-                return;
-            };
+/// Handles gateway events poise doesn't route itself: the music control and
+/// search result buttons.
+pub async fn handle_event(
+    ctx: &SerenityContext,
+    event: &FullEvent,
+    data: &Data,
+) -> Result<(), Error> {
+    let FullEvent::InteractionCreate {
+        interaction: Interaction::Component(interaction),
+    } = event
+    else {
+        return Ok(());
+    };
 
-            debug!(
-                "Received command '{}' from user {} in guild {}",
-                command_name, user.name, guild_id
-            );
+    let button_id = interaction.data.custom_id.as_str();
+    let user = &interaction.user;
 
-            match command_name {
-                "clear" => commands::clear::run(&ctx, &command).await,
-                "damnit-jimmy" => commands::damnit_jimmy::run(&ctx, &command).await,
-                "help" => commands::help::run(&ctx, &command).await,
-                "join" => commands::join::run(&ctx, &command).await,
-                "leave" => commands::leave::run(&ctx, &command).await,
-                "list" => commands::list::run(&ctx, &command).await,
-                "loop" => commands::r#loop::run(&ctx, &command).await,
-                "now-playing" => commands::now_playing::run(&ctx, &command).await,
-                "pause" => commands::pause::run(&ctx, &command).await,
-                "ping" => commands::ping::run(&ctx, &command).await,
-                "play-title" => commands::play_title::run(&ctx, &command).await,
-                "play-url" => commands::play_url::run(&ctx, &command).await,
-                "search" => commands::search::run(&ctx, &command).await,
-                "skip" => commands::skip::run(&ctx, &command).await,
-                "resume" => commands::resume::run(&ctx, &command).await,
-                _ => {
-                    error!("Unknown command received: {}", command_name);
-                    respond_to_error(&command, &ctx.http, format!("Unknown command!")).await;
-                }
-            };
-        } else if let Interaction::Component(command) = interaction {
-            let button_id = command.data.custom_id.as_str();
-            let user = &command.user;
+    let Some(guild_id) = interaction.guild_id else {
+        debug!(
+            "Rejected button '{}' from user {} in DM",
+            button_id, user.name
+        );
+        respond_to_component(
+            interaction,
+            &ctx.http,
+            error_embed("Poor Jimmy only works in servers!"),
+        )
+        .await;
+        return Ok(());
+    };
 
-            if command.guild_id.is_none() {
-                debug!("Rejected button '{}' from user {} in DM", button_id, user.name);
-                respond_to_error_button(
-                    &command,
-                    &ctx.http,
-                    "Poor Jimmy only works in servers!".to_string(),
-                )
-                .await;
-                return;
-            }
+    debug!(
+        "Received button interaction '{}' from user {}",
+        button_id, user.name
+    );
 
-            debug!(
-                "Received button interaction '{}' from user {}",
-                button_id, user.name
-            );
-
-            if button_id.starts_with("search_play_") {
-                commands::search::handle_component(&ctx, &command).await;
-            } else {
-                match button_id {
-                    "clear" => commands::clear::handle_button(&ctx, &command).await,
-                    "loop" => commands::r#loop::handle_button(&ctx, &command).await,
-                    "pause" => commands::pause::handle_button(&ctx, &command).await,
-                    "resume" => commands::resume::handle_button(&ctx, &command).await,
-                    "skip" => commands::skip::handle_button(&ctx, &command).await,
-                    _ => {
-                        error!("Unknown button interaction received: {}", button_id);
-                        respond_to_error_button(&command, &ctx.http, format!("Unknown command!")).await;
-                    }
-                }
-            }
-        }
+    if button_id.starts_with("search_play_") {
+        commands::search::handle_component(ctx, interaction, data, guild_id).await;
+        return Ok(());
     }
 
-    async fn ready(&self, ctx: Context, ready: Ready) {
-        info!("{} is connected! (ID: {})", ready.user.name, ready.user.id);
-
-        let commands = vec![
-            commands::clear::register(),
-            commands::damnit_jimmy::register(),
-            commands::help::register(),
-            commands::join::register(),
-            commands::leave::register(),
-            commands::list::register(),
-            commands::r#loop::register(),
-            commands::now_playing::register(),
-            commands::pause::register(),
-            commands::ping::register(),
-            commands::play_title::register(),
-            commands::play_url::register(),
-            commands::resume::register(),
-            commands::search::register(),
-            commands::skip::register(),
-        ];
-
-        info!("Registering {} slash commands globally...", commands.len());
-
-        match Command::set_global_commands(&ctx.http, commands).await {
-            Ok(registered_commands) => {
-                info!(
-                    "Successfully registered {} slash commands",
-                    registered_commands.len()
-                );
-            }
-            Err(err) => {
-                error!("Failed to register slash commands: {}", err);
-            }
+    let embed = match button_id {
+        "clear" => commands::clear::action(ctx, guild_id).await,
+        "loop" => commands::r#loop::action(ctx, guild_id).await,
+        "pause" => commands::pause::action(ctx, guild_id).await,
+        "resume" => commands::resume::action(ctx, guild_id).await,
+        "skip" => commands::skip::action(ctx, guild_id).await,
+        _ => {
+            error!("Unknown button interaction received: {}", button_id);
+            error_embed("Unknown command!")
         }
+    };
 
-        ctx.set_presence(Some(ActivityData::listening("/play")), OnlineStatus::Online);
-        info!("Bot is ready and listening for commands!");
+    respond_to_component(interaction, &ctx.http, embed).await;
+
+    Ok(())
+}
+
+/// Replies to the errors users can hit in the bot's own style and logs the rest
+pub async fn on_error(error: FrameworkError<'_, Data, Error>) {
+    let (ctx, message) = match error {
+        FrameworkError::GuildOnly { ctx, .. } => (ctx, "Poor Jimmy only works in servers!"),
+        FrameworkError::NotAnOwner { ctx, .. } => {
+            (ctx, "Only Poor Jimmy's owner can update its dependencies!")
+        }
+        FrameworkError::Command { error, ctx, .. } => {
+            error!(
+                "Error in command '{}': {}",
+                ctx.command().qualified_name,
+                error
+            );
+            return;
+        }
+        other => {
+            if let Err(err) = poise::builtins::on_error(other).await {
+                error!("Error while handling error: {}", err);
+            }
+            return;
+        }
+    };
+
+    debug!(
+        "Refused command '{}' from user {}: {}",
+        ctx.command().qualified_name,
+        ctx.author().name,
+        message
+    );
+
+    if let Err(err) = ctx
+        .send(CreateReply::default().embed(error_embed(message)))
+        .await
+    {
+        error!("Failed to send error response: {}", err);
     }
 }

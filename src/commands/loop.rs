@@ -32,7 +32,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
                     Ok(state) => state.loops.eq(&LoopState::Infinite),
                     // If we can't get the track's state, return early
                     Err(why) => {
-                        println!("Error getting song state: {why}");
+                        error!("Error getting song state: {why}");
 
                         let embed = CreateEmbed::new()
                             .description("Error looping song!")
@@ -64,7 +64,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
                 }
                 // Error disabling loop, return early
                 Err(why) => {
-                    println!("Error disabling looping: {why}");
+                    error!("Error disabling looping: {why}");
 
                     let embed = CreateEmbed::new()
                         .description("Error looping song!")
@@ -82,7 +82,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
                 }
                 // Error enabling loop, return early
                 Err(why) => {
-                    println!("Error looping song: {why}");
+                    error!("Error looping song: {why}");
 
                     let embed = CreateEmbed::new()
                         .description("Error looping song!")
@@ -121,7 +121,7 @@ pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
                     Ok(state) => state.loops.eq(&LoopState::Infinite),
                     // If we can't get the track's state, return early
                     Err(why) => {
-                        println!("Error getting song state: {why}");
+                        error!("Error getting song state: {why}");
 
                         respond_to_error_button(command, &ctx.http, format!("Error looping song!"))
                             .await;
@@ -152,7 +152,7 @@ pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
                 }
                 // Error disabling loop, return early
                 Err(why) => {
-                    println!("Error disabling looping: {why}");
+                    error!("Error disabling looping: {why}");
 
                     respond_to_error_button(command, &ctx.http, format!("Error looping song!"))
                         .await;
@@ -165,7 +165,7 @@ pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
                 }
                 // Error enabling loop, return early
                 Err(why) => {
-                    println!("Error looping song: {why}");
+                    error!("Error looping song: {why}");
 
                     respond_to_error_button(command, &ctx.http, format!("Error looping song!"))
                         .await;

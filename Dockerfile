@@ -43,6 +43,10 @@ RUN apk add --update --no-cache \
     libgcc \
     ca-certificates
 
+# Changing this value busts the layer cache below so a rebuild pulls the latest
+# yt-dlp instead of reusing a cached install. CI passes a new value every run.
+ARG YTDLP_REFRESH
+
 # Install yt-dlp via pip for easier updates (gets latest version from PyPI)
 RUN pip install --break-system-packages yt-dlp
 

@@ -57,7 +57,7 @@ First, join a voice channel, then use `/join` to bring Poor Jimmy into your chan
 • `/join` - Summon Poor Jimmy to your voice channel
 • `/leave` - Remove Poor Jimmy from the voice channel
 • `/ping` - Check if the bot is responsive
-• `/damnit-jimmy` - Update Jimmu's dependencies (use if experiencing playback issues)
+• `/damnit-jimmy` - Update Jimmy's dependencies (bot owner only)
 • `/help` - Display this help message
 
 **Tips**

@@ -77,6 +77,8 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
             "--dump-json",
             "--no-playlist",
             "--flat-playlist",
+            // End of options, so a query starting with "-" isn't parsed as a flag
+            "--",
             &query,
         ])
         .output()

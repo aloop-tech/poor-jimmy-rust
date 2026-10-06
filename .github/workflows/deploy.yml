@@ -1,10 +1,14 @@
 name: Build and Deploy
 
-# Triggers: automatic on pushes to main, or manually via the GitHub Actions UI
+# Triggers: automatic on pushes to main, weekly to pick up the latest yt-dlp,
+# or manually via the GitHub Actions UI
 on:
     push:
         branches:
             - main
+    schedule:
+        # Mondays at 09:00 UTC
+        - cron: "0 9 * * 1"
     workflow_dispatch:
 
 env:
@@ -52,6 +56,9 @@ jobs:
                   platforms: linux/arm64
                   tags: ${{ steps.meta.outputs.tags }}
                   labels: ${{ steps.meta.outputs.labels }}
+                  # Unique per run so the yt-dlp install layer is never cached
+                  build-args: |
+                      YTDLP_REFRESH=${{ github.run_id }}
                   # Cache layers in GitHub Actions cache to speed up subsequent builds
                   cache-from: type=gha
                   cache-to: type=gha,mode=max

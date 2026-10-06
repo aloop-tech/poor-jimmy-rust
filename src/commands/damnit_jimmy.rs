@@ -1,6 +1,6 @@
 use crate::utils::response::respond_to_followup;
 use serenity::{
-    all::CommandInteraction,
+    all::{CommandInteraction, UserId},
     builder::{CreateCommand, CreateEmbed},
     client::Context,
     model::Color,
@@ -16,12 +16,23 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
         return;
     }
 
+    if !is_owner(ctx, command.user.id).await {
+        info!("Refused damnit-jimmy from non-owner {}", command.user.name);
+
+        let embed = CreateEmbed::new()
+            .description("Only Poor Jimmy's owner can update its dependencies!")
+            .color(Color::DARK_RED);
+
+        respond_to_followup(command, &ctx.http, embed, false).await;
+        return;
+    }
+
     // Get current version first
     let current_version = get_ytdlp_version().await;
 
     // Execute the update command using pip for latest version
-    let output = match tokio::process::Command::new("sh")
-        .args(&["-c", "pip install --upgrade --break-system-packages yt-dlp"])
+    let output = match tokio::process::Command::new("pip")
+        .args(["install", "--upgrade", "--break-system-packages", "yt-dlp"])
         .output()
         .await
     {
@@ -82,6 +93,23 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
     };
 
     respond_to_followup(command, &ctx.http, result_embed, false).await;
+}
+
+/// Whether the user owns the bot's Discord application, either directly or as a
+/// member of the team that owns it.
+async fn is_owner(ctx: &Context, user_id: UserId) -> bool {
+    match ctx.http.get_current_application_info().await {
+        Ok(info) => {
+            info.owner.is_some_and(|owner| owner.id == user_id)
+                || info
+                    .team
+                    .is_some_and(|team| team.members.iter().any(|m| m.user.id == user_id))
+        }
+        Err(err) => {
+            error!("Failed to fetch application info for owner check: {}", err);
+            false
+        }
+    }
 }
 
 async fn get_ytdlp_version() -> Option<String> {

@@ -18,10 +18,14 @@ impl EventHandler for BotEventHandler {
         if let Interaction::Command(command) = interaction {
             let command_name = command.data.name.as_str();
             let user = &command.user;
-            let guild_id = command
-                .guild_id
-                .map(|g| g.to_string())
-                .unwrap_or_else(|| "DM".to_string());
+
+            // Every command needs a guild, so reject DMs here instead of in each command
+            let Some(guild_id) = command.guild_id else {
+                debug!("Rejected command '{}' from user {} in DM", command_name, user.name);
+                respond_to_error(&command, &ctx.http, "Poor Jimmy only works in servers!".to_string())
+                    .await;
+                return;
+            };
 
             debug!(
                 "Received command '{}' from user {} in guild {}",
@@ -52,6 +56,17 @@ impl EventHandler for BotEventHandler {
         } else if let Interaction::Component(command) = interaction {
             let button_id = command.data.custom_id.as_str();
             let user = &command.user;
+
+            if command.guild_id.is_none() {
+                debug!("Rejected button '{}' from user {} in DM", button_id, user.name);
+                respond_to_error_button(
+                    &command,
+                    &ctx.http,
+                    "Poor Jimmy only works in servers!".to_string(),
+                )
+                .await;
+                return;
+            }
 
             debug!(
                 "Received button interaction '{}' from user {}",

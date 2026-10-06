@@ -30,7 +30,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
             Some(track) => match track.get_info().await {
                 Ok(state) => state.playing,
                 Err(why) => {
-                    println!("Error getting song state: {why}");
+                    error!("Error getting song state: {why}");
 
                     let embed = CreateEmbed::new()
                         .description("Error pausing song!")
@@ -61,7 +61,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
                         respond_to_followup(command, &ctx.http, embed, false).await;
                     }
                     Err(why) => {
-                        println!("Error resuming song: {why}");
+                        error!("Error pausing song: {why}");
 
                         let embed = CreateEmbed::new()
                             .description("Error pausing song!")
@@ -111,7 +111,7 @@ pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
             Some(track) => match track.get_info().await {
                 Ok(state) => state.playing,
                 Err(why) => {
-                    println!("Error getting song state: {why}");
+                    error!("Error getting song state: {why}");
 
                     respond_to_error_button(command, &ctx.http, format!("Error pausing song!"))
                         .await;
@@ -123,7 +123,7 @@ pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
                 respond_to_button(
                     command,
                     &ctx.http,
-                    format!("There is no song to pausse!"),
+                    format!("There is no song to pause!"),
                     false,
                 )
                 .await;
@@ -146,7 +146,7 @@ pub async fn handle_button(ctx: &Context, command: &ComponentInteraction) {
                         .await;
                     }
                     Err(why) => {
-                        println!("Error resuming song: {why}");
+                        error!("Error pausing song: {why}");
 
                         respond_to_error_button(command, &ctx.http, format!("Error pausing song!"))
                             .await;

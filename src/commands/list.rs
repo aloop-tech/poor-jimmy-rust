@@ -60,11 +60,30 @@ pub fn register() -> serenity::builder::CreateCommand {
     serenity::builder::CreateCommand::new("list").description("Display the current queue of songs")
 }
 
+/// Discord rejects embeds whose description is longer than this
+const MAX_DESCRIPTION_LEN: usize = 4096;
+
 fn format_queue_description(list_of_titles: Vec<String>) -> String {
     let mut description = String::new();
 
+    // Room to keep free for the "...and N more" line if the list gets cut off
+    let overflow_reserve = format!("...and {} more", list_of_titles.len()).len();
+
     for (index, title) in list_of_titles.iter().enumerate() {
-        description.push_str(format!("**{}:** {}\n", index + 1, title).as_str())
+        let line = format!("**{}:** {}\n", index + 1, title);
+        let is_last = index + 1 == list_of_titles.len();
+        let limit = if is_last {
+            MAX_DESCRIPTION_LEN
+        } else {
+            MAX_DESCRIPTION_LEN - overflow_reserve
+        };
+
+        if description.len() + line.len() > limit {
+            description.push_str(&format!("...and {} more", list_of_titles.len() - index));
+            break;
+        }
+
+        description.push_str(&line);
     }
 
     description
@@ -111,5 +130,27 @@ mod tests {
         let result = format_queue_description(titles);
         assert!(result.contains("🎵"));
         assert!(result.contains("**markdown**"));
+    }
+
+    #[test]
+    fn test_format_queue_description_truncates_long_queue() {
+        let titles: Vec<String> = (0..200).map(|i| format!("{:0>80}", i)).collect();
+        let result = format_queue_description(titles);
+
+        assert!(result.len() <= MAX_DESCRIPTION_LEN);
+        assert!(result.starts_with("**1:** "));
+        assert!(result.ends_with(" more"));
+
+        // Every listed track plus the "more" count should add up to the whole queue
+        let listed = result.lines().filter(|line| line.starts_with("**")).count();
+        let more: usize = result
+            .lines()
+            .last()
+            .unwrap()
+            .trim_start_matches("...and ")
+            .trim_end_matches(" more")
+            .parse()
+            .unwrap();
+        assert_eq!(listed + more, 200);
     }
 }

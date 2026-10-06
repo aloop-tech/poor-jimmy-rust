@@ -5,14 +5,14 @@ use serenity::{
     builder::{CreateActionRow, CreateButton, CreateEmbed, EditInteractionResponse},
     model::colour::Color,
 };
-use songbird::input::YoutubeDl;
+use songbird::input::{Input, YoutubeDl};
 use tracing::{debug, error};
 
 use crate::{
     data::{Context, Data, Error},
     utils::{
-        response::{error_embed, reply, respond_to_followup_component},
-        track_utils::enqueue,
+        response::{error_embed, ok_embed, reply, respond_to_followup_component},
+        track_utils::{enqueue, load_metadata, voice_target},
     },
 };
 
@@ -210,13 +210,33 @@ pub async fn handle_component(
         error!("Failed to update search results message: {}", err);
     }
 
-    let source = YoutubeDl::new(data.http_client.clone(), video_url);
+    let source: Input = YoutubeDl::new(data.http_client.clone(), video_url).into();
 
     // Delete the loading message before enqueueing
     if let Err(err) = interaction.delete_response(&ctx.http).await {
         error!("Failed to delete loading message: {}", err);
     }
 
-    let embed = enqueue(ctx, data, guild_id, interaction.user.id, source.into()).await;
+    let embed = match queue_selection(ctx, data, guild_id, interaction, source).await {
+        Ok(title) => ok_embed(format!("**Queued** {}!", title)),
+        Err(message) => error_embed(message),
+    };
     respond_to_followup_component(interaction, &ctx.http, embed).await;
+}
+
+/// Load the chosen video and queue it, joining the user's voice channel if needed.
+/// Returns the queued title.
+async fn queue_selection(
+    ctx: &SerenityContext,
+    data: &Data,
+    guild_id: GuildId,
+    interaction: &ComponentInteraction,
+    mut source: Input,
+) -> Result<String, String> {
+    let target = voice_target(ctx, guild_id, interaction.user.id).await?;
+    let metadata = load_metadata(&mut source).await?;
+    let title = metadata.title.clone();
+
+    enqueue(ctx, data, guild_id, target, vec![(source, metadata)]).await?;
+    Ok(title)
 }

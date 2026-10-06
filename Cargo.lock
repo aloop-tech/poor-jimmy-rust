@@ -2338,6 +2338,7 @@ dependencies = [
 name = "poor-jimmy"
 version = "2.0.1"
 dependencies = [
+ "fastrand",
  "poise",
  "reqwest",
  "serde",

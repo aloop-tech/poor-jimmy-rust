@@ -1,18 +1,18 @@
-use serenity::all::{Context as SerenityContext, CreateEmbed, GuildId, UserId};
-use songbird::{Songbird, input::Input, tracks::Track};
+use serenity::{
+    all::{ChannelId, Context as SerenityContext, GuildId, UserId},
+    prelude::Mutex,
+};
+use songbird::{Call, Songbird, input::Input, tracks::Track};
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, error, info, warn};
 
 use crate::{
     data::Data,
     handlers::track_play::TrackPlayHandler,
-    utils::{
-        response::{error_embed, ok_embed},
-        voice::{connect, user_voice_channel},
-    },
+    utils::voice::{connect, user_voice_channel},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TrackMetadata {
     pub title: String,
     pub thumbnail_url: Option<String>,
@@ -26,98 +26,118 @@ pub async fn get_manager(ctx: &SerenityContext) -> Arc<Songbird> {
         .expect("Songbird Voice client placed in at initialization.")
 }
 
-/// Fetches track metadata, joins the requesting user's voice channel if the bot
-/// isn't in one yet, enqueues the source, and registers the playback
-/// notification handler. Returns an embed describing the result (success or
-/// error) for the caller to send.
+// The functions below return user-facing error messages for the caller to show.
+
+/// Where new tracks will play: the bot's current call, or the requesting
+/// user's voice channel to join first
+pub enum VoiceTarget {
+    Connected(Arc<Mutex<Call>>),
+    Join(ChannelId),
+}
+
+/// Work out where a user's tracks would play. Cheap, so callers check this
+/// before any slow metadata fetching.
+pub async fn voice_target(
+    ctx: &SerenityContext,
+    guild_id: GuildId,
+    user_id: UserId,
+) -> Result<VoiceTarget, String> {
+    if let Some(call) = get_manager(ctx).await.get(guild_id) {
+        return Ok(VoiceTarget::Connected(call));
+    }
+
+    match user_voice_channel(&ctx.cache, guild_id, user_id) {
+        Some(channel_id) => Ok(VoiceTarget::Join(channel_id)),
+        None => Err("Join a voice channel first, then try again!".to_string()),
+    }
+}
+
+/// Ask the source for its title, duration, and thumbnail. For yt-dlp sources this
+/// runs yt-dlp (several seconds) and caches the result on the source; a failure
+/// means yt-dlp couldn't load the track.
+pub async fn load_metadata(source: &mut Input) -> Result<TrackMetadata, String> {
+    match source.aux_metadata().await {
+        Ok(meta) => Ok(TrackMetadata {
+            title: meta
+                .title
+                .unwrap_or_else(|| String::from("Unknown Track Title")),
+            thumbnail_url: meta.thumbnail,
+            duration: meta.duration,
+        }),
+        Err(err) => {
+            warn!("Failed to fetch track metadata: {}", err);
+            Err("Couldn't load that track! Check the link or try a different search.".to_string())
+        }
+    }
+}
+
+/// Join the target voice channel if needed, then queue the tracks in order and
+/// register their "Now playing" handlers. Metadata must already be loaded.
 pub async fn enqueue(
     ctx: &SerenityContext,
     data: &Data,
     guild_id: GuildId,
-    user_id: UserId,
-    mut source: Input,
-) -> CreateEmbed {
-    let manager = get_manager(ctx).await;
-    let existing_call = manager.get(guild_id);
-
-    // Check where to join before the slow metadata fetch
-    let join_channel = match &existing_call {
-        Some(_) => None,
-        None => match user_voice_channel(&ctx.cache, guild_id, user_id) {
-            Some(channel_id) => Some(channel_id),
-            None => return error_embed("Join a voice channel first, then try again!"),
-        },
-    };
-
-    // Fetch metadata BEFORE locking the call handler — aux_metadata spawns yt-dlp
-    // and can take several seconds. Holding the call lock during that time blocks
-    // songbird's event dispatch and prevents audio from playing. A failure here
-    // means yt-dlp couldn't load the track, so don't queue (or join) for it.
-    debug!("Fetching track metadata for guild {}", guild_id);
-    let metadata = match source.aux_metadata().await {
-        Ok(meta) => meta,
-        Err(err) => {
-            warn!("Failed to fetch track metadata: {}", err);
-            return error_embed(
-                "Couldn't load that track! Check the link or try a different search.",
-            );
-        }
-    };
-
-    let call = match (existing_call, join_channel) {
-        (Some(call), _) => call,
-        (None, Some(channel_id)) => {
-            match connect(ctx, data, manager.clone(), guild_id, channel_id).await {
+    target: VoiceTarget,
+    tracks: Vec<(Input, TrackMetadata)>,
+) -> Result<(), String> {
+    let call = match target {
+        VoiceTarget::Connected(call) => call,
+        VoiceTarget::Join(channel_id) => {
+            let manager = get_manager(ctx).await;
+            match connect(ctx, data, manager, guild_id, channel_id).await {
                 Ok(call) => call,
                 Err(err) => {
                     error!(
                         "Failed to join voice channel {} in guild {}: {}",
                         channel_id, guild_id, err
                     );
-                    return error_embed("Error joining voice channel!");
+                    return Err("Error joining voice channel!".to_string());
                 }
             }
         }
-        (None, None) => unreachable!("join_channel is set whenever there's no call"),
     };
 
-    let track_title = metadata
-        .title
-        .unwrap_or_else(|| String::from("Unknown Track Title"));
-    let track_thumbnail = metadata.thumbnail;
-    let track_duration = metadata.duration;
-
-    info!("Enqueueing track: '{}' in guild {}", track_title, guild_id);
-
-    let custom_metadata = Arc::new(TrackMetadata {
-        title: track_title.clone(),
-        thumbnail_url: track_thumbnail.clone(),
-        duration: track_duration,
-    });
-
-    let track_with_data = Track::new_with_data(source, custom_metadata);
-
-    // Cancel any pending disconnect timer since we're adding a track
+    // Cancel any pending disconnect timer since we're adding tracks
     data.guilds.cancel_idle_timer(guild_id);
 
-    // Lock only for the enqueue operation, then release immediately.
-    let track = {
-        let mut handler = call.lock().await;
-        handler.enqueue(track_with_data).await
-    };
+    for (source, metadata) in tracks {
+        info!(
+            "Enqueueing track: '{}' in guild {}",
+            metadata.title, guild_id
+        );
 
-    let _ = track.add_event(
-        songbird::Event::Track(songbird::TrackEvent::Playable),
-        TrackPlayHandler {
+        // Start loading the next track 5 seconds before this one ends. Passing
+        // this ourselves (instead of songbird's `enqueue`, which asks the source)
+        // avoids a yt-dlp call per track while holding the call lock.
+        let preload_time = metadata
+            .duration
+            .map(|duration| duration.saturating_sub(Duration::from_secs(5)));
+
+        let play_handler = TrackPlayHandler {
             http: ctx.http.clone(),
             guilds: data.guilds.clone(),
             guild_id,
-            title: track_title.clone(),
-            thumbnail: track_thumbnail.unwrap_or_default(),
-        },
-    );
+            title: metadata.title.clone(),
+            thumbnail: metadata.thumbnail_url.clone().unwrap_or_default(),
+        };
 
-    ok_embed(format!("**Queued** {}!", track_title))
+        let track = Track::new_with_data(source, Arc::new(metadata));
+
+        // Lock only for the enqueue operation, then release immediately.
+        let handle = {
+            let mut handler = call.lock().await;
+            handler.enqueue_with_preload(track, preload_time)
+        };
+
+        if let Err(err) = handle.add_event(
+            songbird::Event::Track(songbird::TrackEvent::Playable),
+            play_handler,
+        ) {
+            debug!("Track ended before its play handler was added: {}", err);
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

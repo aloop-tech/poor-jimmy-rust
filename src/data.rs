@@ -4,7 +4,7 @@ use std::{
 };
 
 use reqwest::Client as HttpClient;
-use serenity::model::prelude::{ChannelId, GuildId};
+use serenity::model::prelude::{ChannelId, GuildId, MessageId};
 use tokio::task::AbortHandle;
 use tracing::warn;
 
@@ -31,6 +31,8 @@ pub struct GuildState {
     pub waiting_for_listeners: bool,
     /// Playback was paused because the channel emptied; resume when someone returns
     pub paused_for_empty_channel: bool,
+    /// The "Now playing" message edited for each new track in this voice session
+    pub player_message: Option<(ChannelId, MessageId)>,
 }
 
 /// Per-guild state, safe to share between tasks
@@ -90,6 +92,7 @@ impl GuildStates {
         self.with(guild_id, |state| {
             state.waiting_for_listeners = false;
             state.paused_for_empty_channel = false;
+            state.player_message = None;
         });
     }
 }
@@ -169,6 +172,7 @@ mod tests {
         guilds.with(guild_id, |state| {
             state.waiting_for_listeners = true;
             state.paused_for_empty_channel = true;
+            state.player_message = Some((channel_id, MessageId::new(3)));
         });
 
         guilds.reset_voice_session(guild_id);
@@ -177,6 +181,7 @@ mod tests {
             assert!(state.disconnect_timer.is_none());
             assert!(!state.waiting_for_listeners);
             assert!(!state.paused_for_empty_channel);
+            assert!(state.player_message.is_none());
             // The announce channel is about the text side, so it survives
             assert_eq!(state.text_channel, Some(channel_id));
         });

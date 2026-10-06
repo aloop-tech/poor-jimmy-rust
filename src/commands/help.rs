@@ -19,9 +19,10 @@ pub fn get_help_text() -> String {
 Join a voice channel, then use `/play` — Poor Jimmy will join you automatically.
 
 **Playing Music**
-• `/play <title or url>` - Search YouTube for a song, or play a link
+• `/play <title or url>` - Search YouTube for a song, or play a song/playlist link
   Example: `/play never gonna give you up`
   Example: `/play https://youtube.com/watch?v=...`
+  Playlist links queue up to 50 songs
 
 • `/search <query>` - Search YouTube and select from results
   Example: `/search lofi hip hop`
@@ -35,6 +36,9 @@ Join a voice channel, then use `/play` — Poor Jimmy will join you automaticall
 
 **Queue Management**
 • `/list` - View all songs in the queue
+• `/remove <position>` - Remove a song (positions from `/list`)
+• `/move <from> <to>` - Move a song to a different spot
+• `/shuffle` - Shuffle the upcoming songs
 • `/clear` - Stop playback and clear the entire queue
 
 **Other Commands**

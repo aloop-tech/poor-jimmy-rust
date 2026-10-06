@@ -49,7 +49,11 @@ mod tests {
     fn test_music_buttons_has_correct_count() {
         let buttons = create_music_buttons();
         if let CreateActionRow::Buttons(ref button_vec) = buttons[0] {
-            assert_eq!(button_vec.len(), 5, "Should have 5 buttons: clear, resume, pause, skip, loop");
+            assert_eq!(
+                button_vec.len(),
+                5,
+                "Should have 5 buttons: clear, resume, pause, skip, loop"
+            );
         } else {
             panic!("Expected CreateActionRow::Buttons variant");
         }

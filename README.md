@@ -1,23 +1,26 @@
 # Poor Jimmy 🎶
 
-Poor Jimmy is a feature-rich Discord music bot written in Rust. This project is a re-write of the [existing Poor Jimmy written with TypeScript](https://github.com/andrewmloop/poor-jimmy). The bot utilizes modern Rust libraries including Serenity for Discord API interactions, Songbird for high-quality audio playback, and Tokio for asynchronous runtime.
+Poor Jimmy is a feature-rich Discord music bot written in Rust. This project is a re-write of the [existing Poor Jimmy written with TypeScript](https://github.com/andrewmloop/poor-jimmy). The bot utilizes modern Rust libraries including Serenity and Poise for Discord API interactions, Songbird for high-quality audio playback, and Tokio for asynchronous runtime.
 
 ## Dependencies
 
 **Core Libraries**
 - [Rust 2024 Edition](https://www.rust-lang.org/learn)
-- [Serenity v0.12.4](https://docs.rs/serenity/latest/serenity/) - Discord API wrapper
-- [Songbird v0.5.0](https://docs.rs/songbird/latest/songbird/) - Audio playback
-- [Tokio v1.47](https://tokio.rs/) - Async runtime
+- [Serenity v0.12.5](https://docs.rs/serenity/latest/serenity/) - Discord API wrapper
+- [Poise v0.6](https://docs.rs/poise/latest/poise/) - Slash command framework
+- [Songbird v0.5.0](https://docs.rs/songbird/latest/songbird/) - Audio playback (from the [beerpsi-forks `davey` branch](https://github.com/beerpsi-forks/songbird/tree/davey) until DAVE voice encryption lands in a release)
+- [Tokio v1.50](https://tokio.rs/) - Async runtime
 
 **Additional Dependencies**
-- `reqwest` - HTTP client for YouTube-DL
+- `reqwest` - HTTP client for audio streams (rustls only, no OpenSSL)
 - `serde` & `serde_json` - Serialization
 - `tracing` & `tracing-subscriber` - Logging
-- `symphonia` - Audio codec support
+- `symphonia` - Audio codecs, including the mkv demuxer YouTube's webm/opus audio needs (unused directly, but must stay a dependency)
+- `fastrand` - Queue shuffling
 
-**External Tool**
-- [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) - YouTube audio extraction
+**External Tools**
+- [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) - YouTube audio extraction, installed with its `default` extra for the YouTube challenge solver
+- [`deno`](https://deno.com/) - JavaScript runtime yt-dlp uses to solve YouTube's playback challenges
 
 ## Getting Started
 
@@ -26,6 +29,7 @@ Poor Jimmy is a feature-rich Discord music bot written in Rust. This project is 
 - [Rust](https://www.rust-lang.org/tools/install) - Rust toolchain (edition 2024)
 - [Docker](https://www.docker.com/get-started) - For containerization (optional)
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) - YouTube audio extraction tool
+- [deno](https://deno.com/) - JavaScript runtime used by yt-dlp for YouTube
 - Discord Bot Token - Create a bot at [Discord Developer Portal](https://discord.com/developers/applications)
 
 ### Configuration
@@ -41,15 +45,16 @@ Poor Jimmy is a feature-rich Discord music bot written in Rust. This project is 
    DISCORD_TOKEN=your_discord_bot_token_here
    ```
 
-3. **Ensure yt-dlp is installed:**
+3. **Ensure yt-dlp and deno are installed** (the Docker image already includes both):
    ```bash
    # macOS
-   brew install yt-dlp
+   brew install yt-dlp deno
 
    # Linux
-   pip install yt-dlp
+   pip install "yt-dlp[default]"
+   curl -fsSL https://deno.land/install.sh | sh
 
-   # Or download from https://github.com/yt-dlp/yt-dlp
+   # Or download from https://github.com/yt-dlp/yt-dlp and https://deno.com
    ```
 
 ### Running Locally (Native)
@@ -80,6 +85,26 @@ Poor Jimmy is a feature-rich Discord music bot written in Rust. This project is 
    ```bash
    docker run --env-file .env poor-jimmy
    ```
+
+## Usage
+
+Join a voice channel and use `/play <song title or link>`. Poor Jimmy joins your channel automatically. Links can be single videos or playlists (up to 50 songs). Use `/help` in Discord for every command, including the queue tools (`/list`, `/remove`, `/move`, `/shuffle`) and playback controls.
+
+Poor Jimmy posts its automatic messages ("Now playing", "Queue has ended", …) in the channel where someone last used one of its commands or buttons. It pauses when everyone leaves the voice channel, resumes if someone returns, and leaves after `AUTO_DISCONNECT_MINUTES` of an empty queue or empty channel.
+
+Commands only work in servers, not DMs.
+
+## Development
+
+Before pushing, run the same checks CI runs on every pull request and push to `main` (`.github/workflows/check.yml`):
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+Pushes to `main` build and publish the Docker image (`.github/workflows/deploy.yml`). It also rebuilds every Monday so the image picks up the latest yt-dlp.
 
 ## Deployment
 
@@ -141,11 +166,11 @@ Required environment variables:
 
 Optional environment variables:
 - `RUST_LOG` - Set logging level (e.g., `info`, `debug`, `warn`)
-- `AUTO_DISCONNECT_MINUTES` - Set auto disconnect wait time (e.g. `10`, defaults to 5 minutes)
+- `AUTO_DISCONNECT_MINUTES` - Minutes to wait before leaving the voice channel once the queue has ended or everyone has left (e.g. `10`, defaults to 5 minutes). Read once at startup.
 
 ## Bot Permissions
 
-When inviting Poor Jimmy to your Discord server, ensure it has the following permissions:
+Poor Jimmy doesn't need any privileged gateway intents. When inviting it to your Discord server, ensure it has the following permissions:
 
 - **Voice Permissions:**
   - Connect
@@ -162,15 +187,17 @@ When inviting Poor Jimmy to your Discord server, ensure it has the following per
 ## Troubleshooting
 
 **Bot doesn't join voice channel:**
-- Ensure you're in a voice channel when using `/join`
+- Ensure you're in a voice channel when using `/play` or `/join`
 - Check that the bot has "Connect" and "Speak" permissions
 
 **Music doesn't play:**
-- Verify `yt-dlp` is installed and accessible
-- Check that the YouTube URL is valid
+- Verify `yt-dlp` and `deno` are installed and accessible
+- Check that the link is valid and from a site yt-dlp supports
+- YouTube changes often: the bot owner can run `/damnit-jimmy` to update yt-dlp, and the Docker image rebuilds weekly with the latest version
 - Ensure the bot has proper voice permissions
 
 **Commands not showing up:**
+- Commands are server-only, so they won't appear in DMs with the bot
 - Discord may take up to an hour to register slash commands globally
 - Try kicking and re-inviting the bot
 - Check that the bot has "Use Slash Commands" permission

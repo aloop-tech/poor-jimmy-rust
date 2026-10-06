@@ -1,7 +1,7 @@
 use tracing::{error, info};
 
 use crate::{
-    data::{Context, Error, cancel_disconnect_timer},
+    data::{Context, Error},
     utils::{
         response::{error_embed, ok_embed, reply},
         track_utils::get_manager,
@@ -13,7 +13,7 @@ use crate::{
 pub async fn leave(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().expect("guild_only command");
 
-    cancel_disconnect_timer(&ctx.data().disconnect_timers, guild_id);
+    ctx.data().guilds.cancel_disconnect_timer(guild_id);
 
     let manager = get_manager(ctx.serenity_context()).await;
 

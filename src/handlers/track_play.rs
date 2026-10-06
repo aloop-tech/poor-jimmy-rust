@@ -4,16 +4,19 @@ use serenity::{
     async_trait,
     builder::{CreateEmbed, CreateMessage},
     http::Http,
-    model::{colour::Color, prelude::ChannelId},
+    model::{colour::Color, prelude::GuildId},
 };
 use songbird::{Event, EventContext, EventHandler};
-use tracing::{error, info};
+use tracing::info;
 
-use crate::components::music_buttons::create_music_buttons;
+use crate::{
+    components::music_buttons::create_music_buttons, data::GuildStates, utils::response::announce,
+};
 
 pub struct TrackPlayHandler {
-    pub channel_id: ChannelId,
     pub http: Arc<Http>,
+    pub guilds: GuildStates,
+    pub guild_id: GuildId,
     pub title: String,
     pub thumbnail: String,
 }
@@ -26,7 +29,7 @@ impl EventHandler for TrackPlayHandler {
             return None;
         };
 
-        info!("Now playing: '{}' in channel {}", self.title, self.channel_id);
+        info!("Now playing: '{}' in guild {}", self.title, self.guild_id);
 
         let embed = CreateEmbed::new()
             .description(format!("**Now playing:** {}", self.title.clone()))
@@ -37,9 +40,7 @@ impl EventHandler for TrackPlayHandler {
             .embed(embed)
             .components(create_music_buttons());
 
-        if let Err(err) = self.channel_id.send_message(&self.http, message).await {
-            error!("Failed to send now playing message to channel {}: {}", self.channel_id, err);
-        }
+        announce(&self.http, &self.guilds, self.guild_id, message).await;
 
         None
     }

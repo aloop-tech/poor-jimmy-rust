@@ -16,14 +16,12 @@ pub fn get_help_text() -> String {
         "## 🎶 Poor Jimmy - Discord Music Bot 🎶
 
 **Getting Started**
-First, join a voice channel, then use `/join` to bring Poor Jimmy into your channel.
+Join a voice channel, then use `/play` — Poor Jimmy will join you automatically.
 
 **Playing Music**
-• `/play-title <title>` - Search and play a song by title
-  Example: `/play-title never gonna give you up`
-
-• `/play-url <url>` - Play a specific YouTube video or share link
-  Example: `/play-url https://youtube.com/watch?v=...`
+• `/play <title or url>` - Search YouTube for a song, or play a link
+  Example: `/play never gonna give you up`
+  Example: `/play https://youtube.com/watch?v=...`
 
 • `/search <query>` - Search YouTube and select from results
   Example: `/search lofi hip hop`
@@ -40,7 +38,7 @@ First, join a voice channel, then use `/join` to bring Poor Jimmy into your chan
 • `/clear` - Stop playback and clear the entire queue
 
 **Other Commands**
-• `/join` - Summon Poor Jimmy to your voice channel
+• `/join` - Summon (or move) Poor Jimmy to your voice channel
 • `/leave` - Remove Poor Jimmy from the voice channel
 • `/ping` - Check if the bot is responsive
 • `/damnit-jimmy` - Update Jimmy's dependencies (bot owner only)
@@ -49,6 +47,6 @@ First, join a voice channel, then use `/join` to bring Poor Jimmy into your chan
 **Tips**
 - Use the interactive buttons that appear with songs for quick controls
 - Queue up multiple songs - they'll play automatically
-- Poor Jimmy must be in a voice channel to play music",
+- Poor Jimmy pauses when everyone leaves the voice channel and resumes when you come back",
     )
 }

@@ -8,8 +8,7 @@ pub mod r#loop;
 pub mod now_playing;
 pub mod pause;
 pub mod ping;
-pub mod play_title;
-pub mod play_url;
+pub mod play;
 pub mod resume;
 pub mod search;
 pub mod skip;
@@ -29,8 +28,7 @@ pub fn all() -> Vec<poise::Command<Data, Error>> {
         now_playing::now_playing(),
         pause::pause(),
         ping::ping(),
-        play_title::play_title(),
-        play_url::play_url(),
+        play::play(),
         resume::resume(),
         search::search(),
         skip::skip(),

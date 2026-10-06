@@ -5,11 +5,19 @@ use tracing::{debug, error};
 use crate::{
     commands,
     data::{Context, Data, Error},
+    handlers::voice_state::handle_voice_state_update,
     utils::response::{error_embed, respond_to_component},
 };
 
-/// Logs each slash command before it runs
+/// Logs each slash command before it runs and remembers its channel as the
+/// guild's channel for automatic messages
 pub async fn pre_command(ctx: Context<'_>) {
+    if let Some(guild_id) = ctx.guild_id() {
+        ctx.data()
+            .guilds
+            .set_text_channel(guild_id, ctx.channel_id());
+    }
+
     let guild_id = ctx
         .guild_id()
         .map(|g| g.to_string())
@@ -23,13 +31,18 @@ pub async fn pre_command(ctx: Context<'_>) {
     );
 }
 
-/// Handles gateway events poise doesn't route itself: the music control and
-/// search result buttons.
+/// Handles gateway events poise doesn't route itself: voice channel changes,
+/// and the music control and search result buttons.
 pub async fn handle_event(
     ctx: &SerenityContext,
     event: &FullEvent,
     data: &Data,
 ) -> Result<(), Error> {
+    if let FullEvent::VoiceStateUpdate { new, .. } = event {
+        handle_voice_state_update(ctx, data, new).await;
+        return Ok(());
+    }
+
     let FullEvent::InteractionCreate {
         interaction: Interaction::Component(interaction),
     } = event
@@ -58,6 +71,9 @@ pub async fn handle_event(
         "Received button interaction '{}' from user {}",
         button_id, user.name
     );
+
+    data.guilds
+        .set_text_channel(guild_id, interaction.channel_id);
 
     if button_id.starts_with("search_play_") {
         commands::search::handle_component(ctx, interaction, data, guild_id).await;

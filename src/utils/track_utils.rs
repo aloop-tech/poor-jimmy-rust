@@ -1,12 +1,15 @@
-use serenity::all::{ChannelId, Context as SerenityContext, CreateEmbed, GuildId};
+use serenity::all::{Context as SerenityContext, CreateEmbed, GuildId, UserId};
 use songbird::{Songbird, input::Input, tracks::Track};
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    data::{Data, cancel_disconnect_timer},
+    data::Data,
     handlers::track_play::TrackPlayHandler,
-    utils::response::{error_embed, ok_embed},
+    utils::{
+        response::{error_embed, ok_embed},
+        voice::{connect, user_voice_channel},
+    },
 };
 
 #[derive(Clone)]
@@ -23,38 +26,59 @@ pub async fn get_manager(ctx: &SerenityContext) -> Arc<Songbird> {
         .expect("Songbird Voice client placed in at initialization.")
 }
 
-/// Fetches track metadata, enqueues the source into the active voice call, and
-/// registers the playback notification handler. Returns an embed describing the
-/// result (success or error) for the caller to send.
+/// Fetches track metadata, joins the requesting user's voice channel if the bot
+/// isn't in one yet, enqueues the source, and registers the playback
+/// notification handler. Returns an embed describing the result (success or
+/// error) for the caller to send.
 pub async fn enqueue(
     ctx: &SerenityContext,
     data: &Data,
     guild_id: GuildId,
-    channel_id: ChannelId,
+    user_id: UserId,
     mut source: Input,
 ) -> CreateEmbed {
     let manager = get_manager(ctx).await;
+    let existing_call = manager.get(guild_id);
 
-    let Some(call) = manager.get(guild_id) else {
-        error!(
-            "Bot is not in a voice channel in guild {}. Cannot enqueue track.",
-            guild_id
-        );
-        return error_embed(
-            "Error playing song! Ensure Poor Jimmy is in a voice channel with **/join**",
-        );
+    // Check where to join before the slow metadata fetch
+    let join_channel = match &existing_call {
+        Some(_) => None,
+        None => match user_voice_channel(&ctx.cache, guild_id, user_id) {
+            Some(channel_id) => Some(channel_id),
+            None => return error_embed("Join a voice channel first, then try again!"),
+        },
     };
 
     // Fetch metadata BEFORE locking the call handler — aux_metadata spawns yt-dlp
     // and can take several seconds. Holding the call lock during that time blocks
-    // songbird's event dispatch and prevents audio from playing.
+    // songbird's event dispatch and prevents audio from playing. A failure here
+    // means yt-dlp couldn't load the track, so don't queue (or join) for it.
     debug!("Fetching track metadata for guild {}", guild_id);
     let metadata = match source.aux_metadata().await {
         Ok(meta) => meta,
         Err(err) => {
-            warn!("Failed to fetch track metadata: {}. Using defaults.", err);
-            Default::default()
+            warn!("Failed to fetch track metadata: {}", err);
+            return error_embed(
+                "Couldn't load that track! Check the link or try a different search.",
+            );
         }
+    };
+
+    let call = match (existing_call, join_channel) {
+        (Some(call), _) => call,
+        (None, Some(channel_id)) => {
+            match connect(ctx, data, manager.clone(), guild_id, channel_id).await {
+                Ok(call) => call,
+                Err(err) => {
+                    error!(
+                        "Failed to join voice channel {} in guild {}: {}",
+                        channel_id, guild_id, err
+                    );
+                    return error_embed("Error joining voice channel!");
+                }
+            }
+        }
+        (None, None) => unreachable!("join_channel is set whenever there's no call"),
     };
 
     let track_title = metadata
@@ -74,7 +98,7 @@ pub async fn enqueue(
     let track_with_data = Track::new_with_data(source, custom_metadata);
 
     // Cancel any pending disconnect timer since we're adding a track
-    cancel_disconnect_timer(&data.disconnect_timers, guild_id);
+    data.guilds.cancel_idle_timer(guild_id);
 
     // Lock only for the enqueue operation, then release immediately.
     let track = {
@@ -85,8 +109,9 @@ pub async fn enqueue(
     let _ = track.add_event(
         songbird::Event::Track(songbird::TrackEvent::Playable),
         TrackPlayHandler {
-            channel_id,
             http: ctx.http.clone(),
+            guilds: data.guilds.clone(),
+            guild_id,
             title: track_title.clone(),
             thumbnail: track_thumbnail.unwrap_or_default(),
         },

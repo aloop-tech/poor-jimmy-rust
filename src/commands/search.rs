@@ -217,6 +217,6 @@ pub async fn handle_component(
         error!("Failed to delete loading message: {}", err);
     }
 
-    let embed = enqueue(ctx, data, guild_id, interaction.channel_id, source.into()).await;
+    let embed = enqueue(ctx, data, guild_id, interaction.user.id, source.into()).await;
     respond_to_followup_component(interaction, &ctx.http, embed).await;
 }

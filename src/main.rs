@@ -82,7 +82,7 @@ async fn main() {
 
                 Ok(Data {
                     http_client: HttpClient::new(),
-                    disconnect_timers: Default::default(),
+                    guilds: Default::default(),
                     auto_disconnect_minutes,
                 })
             })

@@ -6,7 +6,7 @@ mod utils;
 
 use std::env;
 
-use data::Data;
+use data::{Data, parse_auto_disconnect_minutes};
 use handlers::bot_event;
 use reqwest::Client as HttpClient;
 use serenity::{
@@ -41,6 +41,13 @@ async fn main() {
         }
     };
 
+    let auto_disconnect_minutes =
+        parse_auto_disconnect_minutes(env::var("AUTO_DISCONNECT_MINUTES").ok().as_deref());
+    info!(
+        "Auto-disconnect after {} minutes of inactivity",
+        auto_disconnect_minutes
+    );
+
     // Slash commands and buttons arrive regardless of intents. Non-privileged
     // covers GUILDS and GUILD_VOICE_STATES, which /join needs to find the user's channel.
     let intents = GatewayIntents::non_privileged();
@@ -56,7 +63,7 @@ async fn main() {
             ..Default::default()
         })
         // Runs once, on the first Ready event, so commands aren't re-registered on reconnects
-        .setup(|ctx, ready, framework| {
+        .setup(move |ctx, ready, framework| {
             Box::pin(async move {
                 info!("{} is connected! (ID: {})", ready.user.name, ready.user.id);
 
@@ -76,6 +83,7 @@ async fn main() {
                 Ok(Data {
                     http_client: HttpClient::new(),
                     disconnect_timers: Default::default(),
+                    auto_disconnect_minutes,
                 })
             })
         })

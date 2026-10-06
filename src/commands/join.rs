@@ -65,6 +65,7 @@ pub async fn join(ctx: Context<'_>) -> Result<(), Error> {
                         guild_id,
                         manager: manager.clone(),
                         disconnect_timers: ctx.data().disconnect_timers.clone(),
+                        timeout_minutes: ctx.data().auto_disconnect_minutes,
                     },
                 );
             } // lock released before any HTTP requests

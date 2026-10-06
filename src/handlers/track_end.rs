@@ -1,4 +1,4 @@
-use std::{env, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use serenity::{
     async_trait,
@@ -19,6 +19,8 @@ pub struct TrackEndNotifier {
     pub guild_id: GuildId,
     pub manager: Arc<Songbird>,
     pub disconnect_timers: DisconnectTimers,
+    /// How long to wait in an empty queue before leaving the voice channel
+    pub timeout_minutes: u64,
 }
 
 #[async_trait]
@@ -56,10 +58,7 @@ impl VoiceEventHandler for TrackEndNotifier {
         // Cancel any existing timer before starting a new one
         cancel_disconnect_timer(&self.disconnect_timers, self.guild_id);
 
-        let timeout_minutes = env::var("AUTO_DISCONNECT_MINUTES")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(5);
+        let timeout_minutes = self.timeout_minutes;
 
         info!(
             "Starting auto-disconnect timer for {} minutes in guild {}",

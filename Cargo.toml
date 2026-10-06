@@ -4,7 +4,8 @@ version = "2.0.1"
 edition = "2024"
 
 [dependencies]
-reqwest = "0.12"
+# rustls only, matching serenity/songbird; the default native-tls would pull in OpenSSL on Linux
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "charset", "http2"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
@@ -18,6 +19,9 @@ branch = "davey"
 default-features = true
 features = ["builtin-queue"]
 
+# Not used directly, but songbird doesn't enable symphonia's default codecs.
+# This dependency turns them on, including the mkv demuxer YouTube's webm/opus
+# audio needs. Removing it breaks playback.
 [dependencies.symphonia]
 version = "0.5.5"
 

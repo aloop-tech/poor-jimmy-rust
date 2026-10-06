@@ -41,10 +41,9 @@ async fn main() {
         }
     };
 
-    let intents = GatewayIntents::non_privileged()
-        | GatewayIntents::MESSAGE_CONTENT
-        | GatewayIntents::DIRECT_MESSAGES
-        | GatewayIntents::GUILD_VOICE_STATES;
+    // Slash commands and buttons arrive regardless of intents. Non-privileged
+    // covers GUILDS and GUILD_VOICE_STATES, which /join needs to find the user's channel.
+    let intents = GatewayIntents::non_privileged();
 
     info!("Building Discord client with required intents...");
 

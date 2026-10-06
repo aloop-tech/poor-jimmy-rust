@@ -6,9 +6,7 @@ RUN apk add --update --no-cache \
     alpine-sdk \
     pkgconfig \
     cmake \
-    musl-dev \
-    openssl \
-    libressl-dev
+    musl-dev
 
 WORKDIR /poor-jimmy
 

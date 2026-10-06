@@ -1,11 +1,10 @@
 use serenity::{
-    all::{Color, CommandInteraction, CreateEmbed, CreateInteractionResponseFollowup},
+    all::{Color, CommandInteraction, CreateEmbed},
     client::Context,
 };
 use songbird::{Event, TrackEvent};
 use tracing::{error, info, warn};
 
-use crate::commands::help::get_help_text;
 use crate::handlers::track_end::TrackEndNotifier;
 use crate::utils::response::respond_to_followup;
 use crate::utils::type_map::get_disconnect_timers;
@@ -98,21 +97,6 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
                 .description("Poor Jimmy **joined** the voice channel!")
                 .color(Color::DARK_GREEN);
             respond_to_followup(command, &ctx.http, success_embed, false).await;
-
-            // Send help message as a second followup
-            let help_embed = CreateEmbed::new()
-                .description(get_help_text())
-                .color(Color::BLUE);
-
-            if let Err(err) = command
-                .create_followup(
-                    &ctx.http,
-                    CreateInteractionResponseFollowup::new().embed(help_embed),
-                )
-                .await
-            {
-                error!("Failed to send help followup: {}", err);
-            }
         }
         Err(err) => {
             error!(

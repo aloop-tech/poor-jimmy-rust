@@ -32,7 +32,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) {
 
     // Execute the update command using pip for latest version
     let output = match tokio::process::Command::new("pip")
-        .args(["install", "--upgrade", "--break-system-packages", "yt-dlp"])
+        .args(["install", "--upgrade", "--break-system-packages", "yt-dlp[default]"])
         .output()
         .await
     {

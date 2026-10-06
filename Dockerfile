@@ -41,14 +41,18 @@ RUN apk add --update --no-cache \
     python3 \
     py3-pip \
     libgcc \
-    ca-certificates
+    ca-certificates \
+    # JavaScript runtime yt-dlp uses to solve YouTube's signature/throttling
+    # challenges. Without it YouTube extraction is deprecated and degraded.
+    deno
 
 # Changing this value busts the layer cache below so a rebuild pulls the latest
 # yt-dlp instead of reusing a cached install. CI passes a new value every run.
 ARG YTDLP_REFRESH
 
-# Install yt-dlp via pip for easier updates (gets latest version from PyPI)
-RUN pip install --break-system-packages yt-dlp
+# Install yt-dlp via pip for easier updates (gets latest version from PyPI).
+# The [default] extra includes yt-dlp-ejs, the challenge solver scripts deno runs.
+RUN pip install --break-system-packages "yt-dlp[default]"
 
 # Set the working directory for where the binary will live
 WORKDIR /bot

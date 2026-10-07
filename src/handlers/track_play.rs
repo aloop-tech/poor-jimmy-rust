@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serenity::{
     async_trait,
-    builder::{CreateEmbed, CreateMessage, EditMessage},
+    builder::{CreateEmbed, CreateMessage},
     http::Http,
     model::{colour::Color, prelude::GuildId},
 };
@@ -42,37 +42,32 @@ impl EventHandler for TrackPlayHandler {
             return None;
         };
 
-        // Edit this session's player message if it's in the channel people are
-        // using now; otherwise (first track, channel changed) post a new one
-        let player_message = self
-            .guilds
-            .with(self.guild_id, |state| state.player_message)
-            .filter(|(player_channel, _)| *player_channel == channel_id);
-
-        if let Some((_, message_id)) = player_message {
-            let edit = EditMessage::new()
-                .embed(embed.clone())
-                .components(create_music_buttons());
-
-            match channel_id.edit_message(&self.http, message_id, edit).await {
-                Ok(_) => return None,
-                // Most likely someone deleted it
-                Err(err) => debug!("Couldn't edit player message, posting a new one: {}", err),
-            }
-        }
-
         let message = CreateMessage::new()
             .embed(embed)
             .components(create_music_buttons());
 
-        match channel_id.send_message(&self.http, message).await {
-            Ok(message) => self.guilds.with(self.guild_id, |state| {
-                state.player_message = Some((channel_id, message.id));
-            }),
-            Err(err) => error!(
-                "Failed to send now playing message to channel {}: {}",
-                channel_id, err
-            ),
+        let message = match channel_id.send_message(&self.http, message).await {
+            Ok(message) => message,
+            Err(err) => {
+                error!(
+                    "Failed to send now playing message to channel {}: {}",
+                    channel_id, err
+                );
+                return None;
+            }
+        };
+
+        // Replace the previous player (possibly in another channel), so the
+        // only one is the new one at the bottom of the chat
+        let previous = self.guilds.with(self.guild_id, |state| {
+            state.player_message.replace((channel_id, message.id))
+        });
+
+        if let Some((old_channel, old_message)) = previous {
+            // Most likely someone deleted it already
+            if let Err(err) = old_channel.delete_message(&self.http, old_message).await {
+                debug!("Couldn't delete old player message: {}", err);
+            }
         }
 
         None

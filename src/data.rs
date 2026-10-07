@@ -31,7 +31,7 @@ pub struct GuildState {
     pub waiting_for_listeners: bool,
     /// Playback was paused because the channel emptied; resume when someone returns
     pub paused_for_empty_channel: bool,
-    /// The "Now playing" message edited for each new track in this voice session
+    /// The "Now playing" message, reposted for each new track in this voice session
     pub player_message: Option<(ChannelId, MessageId)>,
 }
 
